@@ -1,0 +1,22 @@
+# docker compose --progress=plain up --build base-os
+name: ipxe
+services:
+  # The Base OS (Kernel + RootFS)
+  base-os:
+    build:
+      context: ./base
+      dockerfile: Dockerfile
+    volumes:
+      - ./http/boots/ubuntu:/docker
+      - ./entrypoint:/tmp/entrypoint
+
+    command: /bin/bash -c "/tmp/entrypoint/build.sh"
+
+  # The App Layer (Dependent on Base OS)
+  apps:
+    build:
+      context: ./apps
+      dockerfile: Dockerfile
+      # This tells Docker that 'app-layer' relies on 'base-os'
+      additional_contexts:
+        base_image: service:base-os

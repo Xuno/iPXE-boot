@@ -1,0 +1,5 @@
+#!ipxe
+set base-url http://your-server-ip
+
+
+cascade ${base-url}/ubuntu/boot.ipxe
