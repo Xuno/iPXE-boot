@@ -1,5 +1,7 @@
 #!ipxe
 set base-url http://your-server-ip
+set base-boots-url ${base-url}/boots/ubuntu/current
 
-
-cascade ${base-url}/ubuntu/boot.ipxe
+kernel ${base-boots-url}/vmlinuz boot=casper netboot=url url=${base-boots-url}/filesystem.squashfs ip=dhcp ---
+initrd ${base-boots-url}/initrd.img
+boot

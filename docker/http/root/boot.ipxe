@@ -1,9 +1,5 @@
 #!ipxe
 set base-url http://your-server-ip
-set base-iso-url ${base-url}/iso
-set base-boots-url ${base-url}/boots/ubuntu/current
 
-kernel ${base-boots-url}/vmlinuz boot=casper netboot=http http-path=${base-boots-url}/ layers=${base-boots-url}/base.squashfs:${base-boots-url}/apps.squashfs
-initrd ${base-boots-url}/initrd.img
 
-boot
+chain ${base-url}/ubuntu/boot.ipxe
