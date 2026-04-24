@@ -3,6 +3,7 @@ name: ipxe
 services:
   # The Base OS (Kernel + RootFS)
   base-os:
+    image: ipxe-base-os
     build:
       context: ./base
       dockerfile: Dockerfile
@@ -20,6 +21,8 @@ services:
       # This tells Docker that 'app-layer' relies on 'base-os'
       additional_contexts:
         base_image: service:base-os
+    volumes:
+      - ./http/apps:/out
 
 
   http:

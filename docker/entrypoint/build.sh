@@ -8,9 +8,10 @@ DEST_DIR="$DEST_ROOT/$VERSION"
 
 mkdir -p "$BUILD_DIR" "$DEST_DIR"
 
-KERNEL_FILE=$(find /boot -name "vmlinuz-*" | head -n 1)
-INITRD_FILE=$(find /boot -name "initrd.img-*" -type f | head -n 1)
-[ -f "$KERNEL_FILE" ] && [ -f "$INITRD_FILE" ] || { echo "Missing kernel/initrd"; exit 1; }
+KERNEL_VER=$(ls -1 /lib/modules | sort -V | tail -n 1)
+KERNEL_FILE="/boot/vmlinuz-$KERNEL_VER"
+INITRD_FILE="/boot/initrd.img-$KERNEL_VER"
+[ -f "$KERNEL_FILE" ] && [ -f "$INITRD_FILE" ] || { echo "Missing kernel/initrd for $KERNEL_VER"; exit 1; }
 
 cp "$KERNEL_FILE" "$BUILD_DIR/vmlinuz"
 cp "$INITRD_FILE" "$BUILD_DIR/initrd.img"
@@ -30,8 +31,13 @@ ln -sfn "$VERSION" "$DEST_ROOT/.current.new"
 mv -Tf "$DEST_ROOT/.current.new" "$DEST_ROOT/current"
 
 echo "---"
-lsinitramfs /boot/initrd.img-* | grep -E "casper|scripts/casper" | head
+lsinitramfs "$INITRD_FILE" | grep -E "casper|scripts/casper" | head
 echo "---"
-lsinitramfs /boot/initrd.img-* | grep -iE "microcode|e1000|virtio_net|r8169|sfc" | head
+lsinitramfs "$INITRD_FILE" | grep -iE "microcode|e1000|virtio_net|r8169|sfc"
 
-echo "Deployed $VERSION → current"
+pushd "$DEST_ROOT"
+echo "Purging old versions..."
+ls -1d [0-9]*-[0-9]*-[0-9]* 2>/dev/null | sort -r | tail -n +4 | xargs -r rm -rf
+popd
+
+echo "Deployed $VERSION -> current"
