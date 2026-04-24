@@ -58,4 +58,4 @@ COPY --from=builder /tmp/hello-ipxe /runtime/hello-ipxe
 
 VOLUME ["/out"]
 
-CMD ["/bin/bash", "-lc", "cp -f /runtime/hello-ipxe /out/hello-ipxe && sha256sum /out/hello-ipxe > /out/hello-ipxe.sha256 && ls -lah /out"]
+CMD ["/bin/bash", "-lc", "set -euo pipefail; TARGET_DIR=/out/current; [ -d \"$TARGET_DIR\" ] || { echo \"Missing $TARGET_DIR. Build base-os first.\"; exit 1; }; rm -rf /tmp/app-layer && mkdir -p /tmp/app-layer/opt/apps; cp -f /runtime/hello-ipxe /tmp/app-layer/opt/apps/hello-ipxe; mksquashfs /tmp/app-layer \"$TARGET_DIR/apps.filesystem.squashfs\" -comp zstd -b 1M -noappend -no-recovery; sha256sum \"$TARGET_DIR/apps.filesystem.squashfs\" > \"$TARGET_DIR/apps.filesystem.squashfs.sha256\"; ls -lah \"$TARGET_DIR\""]

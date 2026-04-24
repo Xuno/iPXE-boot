@@ -1,7 +1,8 @@
 #!ipxe
 set base-url http://your-server-ip
 set base-boots-url ${base-url}/boots/ubuntu/current
+set layer-leaf apps.filesystem.squashfs
 
-kernel ${base-boots-url}/vmlinuz boot=casper netboot=url url=${base-boots-url}/filesystem.squashfs ip=dhcp ---
+kernel ${base-boots-url}/vmlinuz boot=casper netboot=url url=${base-boots-url}/filesystem.squashfs layerfs-path=${layer-leaf} ip=dhcp ---
 initrd ${base-boots-url}/initrd.img
 boot
