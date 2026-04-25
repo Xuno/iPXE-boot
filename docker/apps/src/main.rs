@@ -1,3 +1,5 @@
+use hello_ipxe::greet;
+
 fn main() {
-    println!("hello-ipxe app layer artifact");
+    println!("{}", greet("World"));
 }

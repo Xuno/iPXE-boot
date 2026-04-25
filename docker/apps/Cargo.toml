@@ -3,6 +3,14 @@ name = "hello-ipxe"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "hello_ipxe"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hello-ipxe"
+path = "src/main.rs"
+
 [profile.release]
 lto = true
 codegen-units = 1
