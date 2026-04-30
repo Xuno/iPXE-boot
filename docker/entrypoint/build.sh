@@ -14,14 +14,15 @@ INITRD_FILE="/boot/initrd.img-$KERNEL_VER"
 [ -f "$KERNEL_FILE" ] && [ -f "$INITRD_FILE" ] || { echo "Missing kernel/initrd for $KERNEL_VER"; exit 1; }
 
 cp "$KERNEL_FILE" "$BUILD_DIR/vmlinuz"
-cp "$INITRD_FILE" "$BUILD_DIR/initrd.img"
+cp "$INITRD_FILE" "$BUILD_DIR/initrd"
+chmod 644 "$BUILD_DIR/*"
 
 mksquashfs / "$BUILD_DIR/filesystem.squashfs" \
   -comp zstd -b 1M -noappend -no-recovery -wildcards \
   -e "proc/*" "sys/*" "dev/*" "run/*" "tmp/*" \
      "docker/*" "app/*" "var/cache/apt/*" "var/lib/apt/lists/*"
 
-( cd "$BUILD_DIR" && sha256sum vmlinuz initrd.img filesystem.squashfs > SHA256SUMS )
+( cd "$BUILD_DIR" && sha256sum vmlinuz initrd filesystem.squashfs > SHA256SUMS )
 
 mv "$BUILD_DIR"/* "$DEST_DIR/"
 rm -rf "$BUILD_DIR"
@@ -30,8 +31,6 @@ rm -rf "$BUILD_DIR"
 ln -sfn "$VERSION" "$DEST_ROOT/.current.new"
 mv -Tf "$DEST_ROOT/.current.new" "$DEST_ROOT/current"
 
-echo "---"
-lsinitramfs "$INITRD_FILE" | grep -E "casper|scripts/casper" | head
 echo "---"
 lsinitramfs "$INITRD_FILE" | grep -iE "microcode|e1000|virtio_net|r8169|sfc"
 
