@@ -3,3 +3,4 @@
 .idea/
 .idea/*
 /docker/apps/target/
+/ipxe/ipxe.efi
