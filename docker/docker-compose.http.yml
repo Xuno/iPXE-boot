@@ -1,0 +1,23 @@
+# Override docker-compose.yml for HTTP server only
+services:
+  http-server:
+    image: nginx:alpine
+    container_name: ipxe-http
+    ports:
+      - "8080:80"
+    volumes:
+      - ./http/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./http/boots:/var/www/boots:ro
+      - ./http/root:/usr/share/nginx/html:ro
+    restart: unless-stopped
+    networks:
+      - ipxe-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  ipxe-net:
+    driver: bridge

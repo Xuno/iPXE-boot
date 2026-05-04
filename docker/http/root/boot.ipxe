@@ -1,5 +1,28 @@
 #!ipxe
-set base-url http://your-server-ip
 
+set base-url http://localhost:8080/ubuntu/current
+set timeout 10
 
-chain ${base-url}/ubuntu/boot.ipxe
+echo ====================================
+echo Ubuntu 24.04 LTS Diskless Server PXE
+echo ====================================
+
+# Configure MTU for 40G networks (jumbo frames)
+set net0/mtu 9000
+
+# DHCP boot
+dhcp
+
+# Set MTU if not already set
+set net0/mtu 9000
+
+echo Booting Ubuntu 24.04 LTS from diskless PXE...
+chain http://${base-url}/vmlinuz \
+    boot=casper \
+    ip=dhcp \
+    file=/cdrom/preseed/ubuntu.seed \
+    boot=casper \
+    noprompt \
+    boot=casper \
+    initrd=http://${base-url}/initrd \
+    BOOT_IMAGE=/casper/vmlinuz

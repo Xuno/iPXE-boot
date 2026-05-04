@@ -13,6 +13,25 @@ services:
 
     command: /bin/bash -c "/tmp/entrypoint/build.sh"
 
+  # HTTP Server for PXE Boot
+  http-server:
+    image: nginx:alpine
+    container_name: ipxe-http
+    ports:
+      - "8080:80"
+    volumes:
+      - ./http/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./http/boots:/var/www/boots:ro
+      - ./http/root:/usr/share/nginx/html:ro
+    restart: unless-stopped
+    networks:
+      - ipxe-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # The App Layer (Dependent on Base OS)
   apps:
     build:
@@ -29,3 +48,7 @@ services:
         RUST_SIGNING_FPR: ${RUST_SIGNING_FPR:-108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE}
     volumes:
       - ./http/boots/ubuntu:/out
+
+networks:
+  ipxe-net:
+    driver: bridge

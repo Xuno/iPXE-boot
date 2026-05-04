@@ -19,10 +19,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 
-# 2. Configure initramfs for network boot
+# 2. Configure initramfs for network boot with MTU 9000 support
 RUN sed -i 's/MODULES=dep/MODULES=most/' /etc/initramfs-tools/initramfs.conf \
     && sed -i 's/COMPRESS=.*/COMPRESS=zstd/' /etc/initramfs-tools/initramfs.conf \
     && echo "BOOT=casper" >> /etc/initramfs-tools/initramfs.conf \
+    && echo "MTU=9000" >> /etc/initramfs-tools/initramfs.conf \
     && printf "virtio\nvirtio_ring\nvirtio_pci\nvirtio_net\nnet_failover\ne1000\ne1000e\nr8169\nsfc\n" >> /etc/initramfs-tools/modules
 
 # 3. Add initramfs network boot hook
