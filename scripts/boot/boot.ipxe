@@ -1,0 +1,31 @@
+#!/ipxe
+
+set base-url http://localhost:8080/iso
+set iso-url http://localhost:8080/iso/ubuntu-24.04-custom.iso
+set boots-url http://localhost:8080/boots/ubuntu/current
+set layer-leaf apps.filesystem.squashfs
+set timeout 10
+
+echo =================================================
+echo Ubuntu 24.04 LTS Custom Boot - PXE/iPXE
+echo =================================================
+
+# Configure MTU for 40G networks (jumbo frames)
+set net0/mtu 9000
+
+# DHCP boot
+dhcp
+
+# Set MTU if not already set
+set net0/mtu 9000
+
+echo Checking for ISO file availability...
+
+# Try ISO boot first
+chain http://${iso-url} || {
+  echo "ISO not available, trying PXE layered boot..."
+  chain http://${boots-url}/boot.ipxe || {
+    echo "PXE boot failed, aborting."
+    halt
+  }
+}

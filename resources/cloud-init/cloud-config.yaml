@@ -1,0 +1,95 @@
+#cloud-config
+hostname: ubuntu-server
+manage_pty: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - cloud-init
+  - git
+  - bash-completion
+  - jq
+  - net-tools
+  - tcpdump
+
+users:
+  - name: ubuntu
+    lock_passwd: true
+    shell: /bin/bash
+    groups: sudo
+
+  - name: admin
+    lock_passwd: false
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..."
+
+# FIRST BOOT ONLY - Run after system is booted
+runcmd:
+  - echo "=== Phase 1: Installing Rust Toolchain ==="
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  - export PATH="/root/.cargo/bin:${PATH}"
+  - rustup default stable
+  - rustup target add x86_64-unknown-linux-gnu
+  
+  - echo "=== Phase 2: Installing Application Dependencies ==="  
+  - apt-get update
+  - apt-get install -y --no-install-recommends \
+      curl git build-essential pkg-config \
+      nfs-common
+  - rm -rf /var/lib/apt/lists/*
+  
+  - echo "=== Phase 3: Creating Deployment User ==="
+  - sudo useradd -m -s /bin/bash deployer || true
+  - PASS=$(openssl rand -base64 32)
+  - echo "deployer:${PASS}" | sudo chpasswd
+  - echo "deployer ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/deployer
+  
+  - echo "=== Phase 4: Setting up NFS Client ==="
+  - echo "$NFS_SERVER:/data/deployment /data/nfs  nfs vers=4,nr 0 0" | sudo tee -a /etc/fstab || true
+  
+  - echo "=== Phase 5: Applying Configurations ==="
+  - sudo mkdir -p /data/nfs /opt/applications
+  
+  - echo "=== Phase 6: Fetching and Building Application ==="
+  - cd /tmp
+  - git clone https://github.com/your-org/your-app.git
+  - cd your-app
+  - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  - export PATH="$HOME/.cargo/bin:$PATH"
+  - cargo build --release
+  - sudo install -m 0755 target/release/your-app /usr/local/bin/your-app
+  - sudo chmod +x /usr/local/bin/your-app
+  
+  - echo "=== Phase 7: Creating Systemd Service ==="
+  - sudo cat > /etc/systemd/system/your-app.service <<EOF
+[Unit]
+Description=Your Rust Application
+After=network.target
+
+[Service]
+Type=simple
+User=deployer
+WorkingDirectory=/opt/applications/your-app
+ExecStart=/usr/local/bin/your-app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  - sudo systemctl daemon-reload
+  - sudo systemctl enable your-app.service
+
+final_message: "Ubuntu 24.04 Server configured successfully via cloud-init."
+
+# Prevent cloud-init from running again on subsequent boots
+commands:
+  - echo "0 cloud-init.per-services start" | sudo tee /etc/crontab > /dev/null || true
+
+# System configuration - disable cloud-init auto-run
+system_info:
+  package_update: true
+  package_upgrade: true
