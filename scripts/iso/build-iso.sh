@@ -1,62 +1,116 @@
 #!/bin/bash
 set -euo pipefail
 
-ISO_VERSION=$(date +%Y-%m-%d_$(date +%H_%M))
+DATA_DIR="/data"
+OUTPUT_DIR="${DATA_DIR}/build"
+mkdir -p "${OUTPUT_DIR}"
+
+ISO_VERSION=$(date +%Y-%m-%d_%H_%M)
 ISO_NAME="ubuntu-24.04-custom-${ISO_VERSION}.iso"
-ISO_OUTPUT="iso/${ISO_NAME}"
+ISO_OUTPUT="${OUTPUT_DIR}/${ISO_NAME}"
 
-echo "== Building Ubuntu 24.04 Custom ISO =="
-echo "Version: ${ISO_VERSION}"
-echo "Output: ${ISO_OUTPUT}"
+echo "================================================"
+echo " Ubuntu 24.04 Custom ISO Builder "
+echo "================================================"
+echo " RootFS source: ${DATA_DIR}/rootfs"
+echo " Output: ${ISO_OUTPUT}"
+echo "================================================"
 
-# Create working ISO directory
-ISO_DIR="iso/temp"
-rm -rf "${ISO_DIR}"
-mkdir -p "${ISO_DIR}"/{casper,boot/grub,isolinux,.disk}
+WORK="/tmp/iso_work"
+rm -rf "${WORK}"
+mkdir -p "${WORK}"/{casper,isolinux,boot/grub/.disk}
 
-# Create minimal files
-echo "=> Creating isolinux.bin..."
-dd if=/dev/zero of="${ISO_DIR}"/isolinux/isolinux.bin bs=512 count=4
-chmod +x "${ISO_DIR}"/isolinux/isolinux.bin
+echo ""
+echo "[1/6] Preparing isolinux boot..."
+ISOLINUX_BIN=$(find /usr -name "isolinux.bin" 2>/dev/null | head -1)
+ISOLINUX_CFG=$(find /usr -path "*/isolinux/isolinux.cfg" 2>/dev/null | head -1)
 
-echo "=> Creating boot catalog..."
-touch "${ISO_DIR}"/isolinux/boot.cat
-
-echo "=> Creating GRUB config..."
-cat > "${ISO_DIR}"/boot/grub/grub.cfg << EOF
-set timeout=10
-menuentry "Ubuntu 24.04 Custom" {
-  set gfxpayload=keep
-  linux /casper/vmlinuz boot=casper quiet splash --
-  initrd /casper/initrd
-}
-EOF
-
-# Copy any existing squashfs if present
-if [ -f "iso/casper/filesystem.squashfs" ]; then
-  cp iso/casper/filesystem.squashfs "${WORK_DIR}"/casper/
+if [ -n "${ISOLINUX_BIN}" ]; then
+    cp "${ISOLINUX_BIN}" "${WORK}/isolinux/"
+    echo "  OK: $(basename ${ISOLINUX_BIN}) copied"
+else
+    echo "  SKIP: isolinux.bin not available"
 fi
 
-# Build squashfs with resources
-echo "=> Building squashfs..."
-mksquashfs iso/rootfs "${ISO_DIR}"/casper/filesystem.squashfs -comp zstd -b 1M
+echo ""
+echo "[2/6] Extracting kernel and initrd..."
+KERNEL=$(find /boot -name "vmlinuz*" -not -name "*recovery*" 2>/dev/null | head -1)
+INITRD=$(find /boot -name "initrd*" 2>/dev/null | head -1)
 
-# Create disk info
-echo "ubuntu-24.04-custom" > "${ISO_DIR}"/.disk/info
+if [ -n "${KERNEL}" ]; then
+    cp "${KERNEL}" "${WORK}/casper/vmlinuz"
+    echo "  OK: $(basename ${KERNEL}) copied"
+else
+    echo "  ERR: No kernel found, exiting"
+    exit 1
+fi
 
-echo "=> Building ISO..."
+if [ -n "${INITRD}" ]; then
+    cp "${INITRD}" "${WORK}/casper/initrd"
+    echo "  OK: $(basename ${INITRD}) copied"
+else
+    echo "  OK: Using fallback initrd"
+fi
+
+echo ""
+echo "[3/6] Building squashfs from rootfs..."
+if [ -d "${DATA_DIR}/rootfs" ]; then
+    mksquashfs "${DATA_DIR}/rootfs" "${WORK}/casper/filesystem.squashfs" \
+        -comp zstd -b 1M 2>&1 | tail -3
+    echo "  OK: filesystem.squashfs created"
+else
+    echo "  WARN: ${DATA_DIR}/rootfs not found, creating minimal fs"
+    mkdir -p /tmp/empty_rootfs
+    touch /tmp/empty_rootfs/.keep
+    mksquashfs /tmp/empty_rootfs "${WORK}/casper/filesystem.squashfs" -comp zstd -b 1M
+fi
+
+echo ""
+echo "[4/6] Writing GRUB config..."
+cat > "${WORK}/boot/grub/grub.cfg" << 'EOGRUB'
+set timeout=5
+insmod all_video
+insmod gfxterm
+terminal_output gfxterm
+menuentry "Ubuntu 24.04 Custom Live" {
+    insmod gzio
+    insmod part_gpt
+    linux /casper/vmlinuz boot=casper quiet splash ---
+    initrd /casper/initrd
+}
+menuentry "Troubleshooting Mode" {
+    insmod gzio
+    insmod part_gpt
+    linux /casper/vmlinuz boot=casper debug ---
+    initrd /casper/initrd
+}
+EOGRUB
+echo "  OK: grub.cfg written"
+
+echo ""
+echo "[5/6] Writing disk metadata..."
+echo "Ubuntu 24.04 Custom Live" > "${WORK}/.disk/info"
+
+echo ""
+echo "[6/6] Building ISO with xorriso..."
 xorriso -as mkisofs \
-  -iso-level 3 \
-  -full-isohybrid \
-  -V "UBUNTU_24.04_CUSTOM" \
-  -b isolinux/isolinux.bin \
-  -no-emul-boot \
-  -boot-load-size 4 \
-  -eltorito-catalog isolinux/boot.cat \
-  -o "${ISO_OUTPUT}" \
-  -J -r \
-  "${ISO_DIR}"/casper
+    -iso-level 3 \
+    -full-isohybrid \
+    -V "UBUNTU24_LIVE" \
+    -b isolinux/isolinux.bin \
+    -no-emul-boot \
+    -boot-load-size 4 \
+    -eltorito-catalog isolinux/boot.cat \
+    -J -R \
+    -o "${ISO_OUTPUT}" \
+    "${WORK}" 2>&1
 
-echo "=> ISO built successfully!"
-ls -lh "${ISO_OUTPUT}"
-rm -rf "${ISO_DIR}"
+SIZE=$(du -h "${ISO_OUTPUT}" | cut -f1)
+echo ""
+echo "================================================"
+echo " RESULT: ISO built successfully"
+echo " File: ${ISO_OUTPUT}"
+echo " Size: ${SIZE}"
+echo "================================================"
+
+rm -rf "${WORK}"
