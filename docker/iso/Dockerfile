@@ -1,14 +1,27 @@
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xorriso squashfs-tools syslinux genisoimage zstd \
+    ca-certificates \
+    curl \
+    file \
+    gnupg \
+    initramfs-tools \
+    isolinux \
+    rsync \
+    squashfs-tools \
+    xorriso \
+    xz-utils \
+    zstd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/iso/build-iso.sh /build.sh
-COPY iso /data
 
 WORKDIR /root
 
 RUN chmod +x /build.sh
+
+VOLUME ["/out"]
+
+CMD ["/build.sh"]

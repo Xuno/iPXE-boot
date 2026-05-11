@@ -1,116 +1,192 @@
 #!/bin/bash
 set -euo pipefail
 
-DATA_DIR="/data"
-OUTPUT_DIR="${DATA_DIR}/build"
-mkdir -p "${OUTPUT_DIR}"
+UBUNTU_ISO_URL="${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso}"
+VERIFY_UBUNTU_ISO="${VERIFY_UBUNTU_ISO:-1}"
+CUSTOM_ISO_NAME="${CUSTOM_ISO_NAME:-ubuntu-24.04-custom.iso}"
+OUT_DIR="${OUT_DIR:-/out}"
+WORK="${WORK:-/tmp/iso-work}"
 
-ISO_VERSION=$(date +%Y-%m-%d_%H_%M)
-ISO_NAME="ubuntu-24.04-custom-${ISO_VERSION}.iso"
-ISO_OUTPUT="${OUTPUT_DIR}/${ISO_NAME}"
+RUST_VERSION="${RUST_VERSION:-1.94.1}"
+RUST_ARCH="${RUST_ARCH:-x86_64-unknown-linux-gnu}"
+RUST_DIST_BASE="${RUST_DIST_BASE:-https://static.rust-lang.org/dist}"
+RUST_KEY_URL="${RUST_KEY_URL:-https://keybase.io/rust/pgp_keys.asc}"
+RUST_SIGNING_FPR="${RUST_SIGNING_FPR:-108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE}"
 
-echo "================================================"
-echo " Ubuntu 24.04 Custom ISO Builder "
-echo "================================================"
-echo " RootFS source: ${DATA_DIR}/rootfs"
-echo " Output: ${ISO_OUTPUT}"
-echo "================================================"
+UBUNTU_ISO_FILE="${UBUNTU_ISO_URL##*/}"
+BASE_ISO="${WORK}/${UBUNTU_ISO_FILE}"
+ROOTFS="${WORK}/rootfs"
+NEW_SQUASHFS="${WORK}/filesystem.squashfs"
+FILESYSTEM_SIZE="${WORK}/filesystem.size"
+FILESYSTEM_MANIFEST="${WORK}/filesystem.manifest"
+KERNEL_OUT="${WORK}/vmlinuz"
+INITRD_OUT="${WORK}/initrd"
+TMP_ISO="${WORK}/${CUSTOM_ISO_NAME}.tmp"
+FINAL_ISO="${OUT_DIR}/${CUSTOM_ISO_NAME}"
 
-WORK="/tmp/iso_work"
+log() {
+    printf '\n[%s] %s\n' "$(date +%H:%M:%S)" "$*"
+}
+
+require_file() {
+    local path="$1"
+    local description="$2"
+    if [ ! -s "$path" ]; then
+        echo "Missing ${description}: ${path}" >&2
+        exit 1
+    fi
+}
+
 rm -rf "${WORK}"
-mkdir -p "${WORK}"/{casper,isolinux,boot/grub/.disk}
+mkdir -p "${WORK}" "${OUT_DIR}" "${OUT_DIR}/casper"
 
-echo ""
-echo "[1/6] Preparing isolinux boot..."
-ISOLINUX_BIN=$(find /usr -name "isolinux.bin" 2>/dev/null | head -1)
-ISOLINUX_CFG=$(find /usr -path "*/isolinux/isolinux.cfg" 2>/dev/null | head -1)
+log "Downloading Ubuntu Server live ISO"
+curl -fL --retry 5 --retry-delay 5 -o "${BASE_ISO}" "${UBUNTU_ISO_URL}"
 
-if [ -n "${ISOLINUX_BIN}" ]; then
-    cp "${ISOLINUX_BIN}" "${WORK}/isolinux/"
-    echo "  OK: $(basename ${ISOLINUX_BIN}) copied"
-else
-    echo "  SKIP: isolinux.bin not available"
+if [ "${VERIFY_UBUNTU_ISO}" = "1" ]; then
+    log "Verifying Ubuntu ISO checksum"
+    ISO_DIR_URL="${UBUNTU_ISO_URL%/*}"
+    ISO_FILE_NAME="${UBUNTU_ISO_FILE}"
+    curl -fL --retry 5 --retry-delay 5 -o "${WORK}/SHA256SUMS" "${ISO_DIR_URL}/SHA256SUMS"
+    grep -E "[ *]${ISO_FILE_NAME}$" "${WORK}/SHA256SUMS" > "${WORK}/SHA256SUMS.single"
+    (cd "${WORK}" && sha256sum -c SHA256SUMS.single)
 fi
 
-echo ""
-echo "[2/6] Extracting kernel and initrd..."
-KERNEL=$(find /boot -name "vmlinuz*" -not -name "*recovery*" 2>/dev/null | head -1)
-INITRD=$(find /boot -name "initrd*" 2>/dev/null | head -1)
+log "Extracting live filesystem"
+SQUASHFS_PATH="$(xorriso -indev "${BASE_ISO}" -find /casper -name '*.squashfs' -print 2>/dev/null | grep -v '/installer.squashfs$' | head -n 1)"
+if [ -z "${SQUASHFS_PATH}" ]; then
+    echo "No casper squashfs found in ${BASE_ISO}" >&2
+    exit 1
+fi
+SQUASHFS_BASENAME="${SQUASHFS_PATH##*/}"
+SQUASHFS_STEM="${SQUASHFS_BASENAME%.squashfs}"
+SIZE_PATH="/casper/${SQUASHFS_STEM}.size"
+MANIFEST_PATH="/casper/${SQUASHFS_STEM}.manifest"
+xorriso -osirrox on -indev "${BASE_ISO}" -extract "${SQUASHFS_PATH}" "${WORK}/base-filesystem.squashfs" >/dev/null 2>&1
+unsquashfs -q -d "${ROOTFS}" "${WORK}/base-filesystem.squashfs"
 
-if [ -n "${KERNEL}" ]; then
-    cp "${KERNEL}" "${WORK}/casper/vmlinuz"
-    echo "  OK: $(basename ${KERNEL}) copied"
-else
-    echo "  ERR: No kernel found, exiting"
+log "Configuring live rootfs with updates, drivers, cloud-init, NFS client, and Rust"
+cp /etc/resolv.conf "${ROOTFS}/etc/resolv.conf"
+cat > "${ROOTFS}/usr/sbin/policy-rc.d" <<'EOF'
+#!/bin/sh
+exit 101
+EOF
+chmod +x "${ROOTFS}/usr/sbin/policy-rc.d"
+
+cat > "${ROOTFS}/tmp/configure-ipxe-rootfs.sh" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get -y dist-upgrade
+apt-get install -y --no-install-recommends \
+    bash-completion \
+    build-essential \
+    ca-certificates \
+    casper \
+    cloud-init \
+    curl \
+    ethtool \
+    git \
+    gnupg \
+    iproute2 \
+    iputils-ping \
+    jq \
+    linux-firmware \
+    linux-generic \
+    linux-modules-extra-generic \
+    nfs-common \
+    openssh-server \
+    pkg-config \
+    tcpdump \
+    xz-utils
+
+sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf
+sed -i 's/^COMPRESS=.*/COMPRESS=zstd/' /etc/initramfs-tools/initramfs.conf
+for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc; do
+    grep -qxF "${module}" /etc/initramfs-tools/modules || printf '%s\n' "${module}" >> /etc/initramfs-tools/modules
+done
+
+cat > /etc/cloud/cloud.cfg.d/99-ipxe-nocloud.cfg <<'EOC'
+datasource_list: [ NoCloud, ConfigDrive, None ]
+EOC
+
+mkdir -p /opt/rust
+if [ -n "${RUST_VERSION:-}" ]; then
+    RUST_PKG="rust-${RUST_VERSION}-${RUST_ARCH}.tar.xz"
+    TMP_RUST="/tmp/rust-install"
+    rm -rf "${TMP_RUST}"
+    mkdir -p "${TMP_RUST}"
+    cd "${TMP_RUST}"
+    curl -fsSLO "${RUST_DIST_BASE}/${RUST_PKG}"
+    curl -fsSLO "${RUST_DIST_BASE}/${RUST_PKG}.asc"
+    curl -fsSL -o rust-key.asc "${RUST_KEY_URL}"
+    gpg --batch --import rust-key.asc
+    if [ -n "${RUST_SIGNING_FPR:-}" ]; then
+        gpg --batch --list-keys --with-colons "${RUST_SIGNING_FPR}" | grep -q '^fpr:'
+    fi
+    gpg --batch --verify "${RUST_PKG}.asc" "${RUST_PKG}"
+    tar -xJf "${RUST_PKG}"
+    "./rust-${RUST_VERSION}-${RUST_ARCH}/install.sh" --prefix=/opt/rust --without=rust-docs
+    ln -sfn /opt/rust/bin/rustc /usr/local/bin/rustc
+    ln -sfn /opt/rust/bin/cargo /usr/local/bin/cargo
+    rm -rf "${TMP_RUST}" /root/.gnupg
+fi
+
+KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+update-initramfs -u -k "${KERNEL_VER}" || update-initramfs -c -k "${KERNEL_VER}"
+apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/*
+EOF
+chmod +x "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
+
+chroot "${ROOTFS}" /usr/bin/env \
+    RUST_VERSION="${RUST_VERSION}" \
+    RUST_ARCH="${RUST_ARCH}" \
+    RUST_DIST_BASE="${RUST_DIST_BASE}" \
+    RUST_KEY_URL="${RUST_KEY_URL}" \
+    RUST_SIGNING_FPR="${RUST_SIGNING_FPR}" \
+    /tmp/configure-ipxe-rootfs.sh
+
+rm -f "${ROOTFS}/usr/sbin/policy-rc.d" "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
+
+KERNEL_VER="$(chroot "${ROOTFS}" /bin/bash -lc "ls -1 /lib/modules | sort -V | tail -n 1")"
+cp "${ROOTFS}/boot/vmlinuz-${KERNEL_VER}" "${KERNEL_OUT}"
+cp "${ROOTFS}/boot/initrd.img-${KERNEL_VER}" "${INITRD_OUT}"
+require_file "${KERNEL_OUT}" "custom kernel"
+require_file "${INITRD_OUT}" "custom initrd"
+
+if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/ethernet/sfc/sfc.ko'; then
+    echo "Custom initrd does not contain sfc.ko" >&2
+    exit 1
+fi
+if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/virtio_net.ko'; then
+    echo "Custom initrd does not contain virtio_net.ko" >&2
     exit 1
 fi
 
-if [ -n "${INITRD}" ]; then
-    cp "${INITRD}" "${WORK}/casper/initrd"
-    echo "  OK: $(basename ${INITRD}) copied"
-else
-    echo "  OK: Using fallback initrd"
-fi
+chroot "${ROOTFS}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${FILESYSTEM_MANIFEST}"
+du -sx --block-size=1 "${ROOTFS}" | cut -f1 > "${FILESYSTEM_SIZE}"
 
-echo ""
-echo "[3/6] Building squashfs from rootfs..."
-if [ -d "${DATA_DIR}/rootfs" ]; then
-    mksquashfs "${DATA_DIR}/rootfs" "${WORK}/casper/filesystem.squashfs" \
-        -comp zstd -b 1M 2>&1 | tail -3
-    echo "  OK: filesystem.squashfs created"
-else
-    echo "  WARN: ${DATA_DIR}/rootfs not found, creating minimal fs"
-    mkdir -p /tmp/empty_rootfs
-    touch /tmp/empty_rootfs/.keep
-    mksquashfs /tmp/empty_rootfs "${WORK}/casper/filesystem.squashfs" -comp zstd -b 1M
-fi
+log "Repacking live filesystem"
+mksquashfs "${ROOTFS}" "${NEW_SQUASHFS}" -comp zstd -b 1M -noappend -no-recovery
 
-echo ""
-echo "[4/6] Writing GRUB config..."
-cat > "${WORK}/boot/grub/grub.cfg" << 'EOGRUB'
-set timeout=5
-insmod all_video
-insmod gfxterm
-terminal_output gfxterm
-menuentry "Ubuntu 24.04 Custom Live" {
-    insmod gzio
-    insmod part_gpt
-    linux /casper/vmlinuz boot=casper quiet splash ---
-    initrd /casper/initrd
-}
-menuentry "Troubleshooting Mode" {
-    insmod gzio
-    insmod part_gpt
-    linux /casper/vmlinuz boot=casper debug ---
-    initrd /casper/initrd
-}
-EOGRUB
-echo "  OK: grub.cfg written"
+log "Repacking ISO and preserving original boot metadata"
+xorriso -indev "${BASE_ISO}" \
+    -outdev "${TMP_ISO}" \
+    -boot_image any replay \
+    -overwrite on \
+    -map "${NEW_SQUASHFS}" "${SQUASHFS_PATH}" \
+    -map "${KERNEL_OUT}" /casper/vmlinuz \
+    -map "${INITRD_OUT}" /casper/initrd \
+    -map "${FILESYSTEM_SIZE}" "${SIZE_PATH}" \
+    -map "${FILESYSTEM_MANIFEST}" "${MANIFEST_PATH}"
 
-echo ""
-echo "[5/6] Writing disk metadata..."
-echo "Ubuntu 24.04 Custom Live" > "${WORK}/.disk/info"
+mv -f "${TMP_ISO}" "${FINAL_ISO}"
+cp -f "${KERNEL_OUT}" "${OUT_DIR}/casper/vmlinuz"
+cp -f "${INITRD_OUT}" "${OUT_DIR}/casper/initrd"
+(cd "${OUT_DIR}" && sha256sum "${CUSTOM_ISO_NAME}" casper/vmlinuz casper/initrd > SHA256SUMS)
 
-echo ""
-echo "[6/6] Building ISO with xorriso..."
-xorriso -as mkisofs \
-    -iso-level 3 \
-    -full-isohybrid \
-    -V "UBUNTU24_LIVE" \
-    -b isolinux/isolinux.bin \
-    -no-emul-boot \
-    -boot-load-size 4 \
-    -eltorito-catalog isolinux/boot.cat \
-    -J -R \
-    -o "${ISO_OUTPUT}" \
-    "${WORK}" 2>&1
-
-SIZE=$(du -h "${ISO_OUTPUT}" | cut -f1)
-echo ""
-echo "================================================"
-echo " RESULT: ISO built successfully"
-echo " File: ${ISO_OUTPUT}"
-echo " Size: ${SIZE}"
-echo "================================================"
-
-rm -rf "${WORK}"
+log "ISO build complete"
+ls -lh "${FINAL_ISO}" "${OUT_DIR}/casper/vmlinuz" "${OUT_DIR}/casper/initrd"

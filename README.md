@@ -1,6 +1,6 @@
 # iPXE Bootable Ubuntu 24.04 LTS Diskless Server
 
-A production-ready PXE boot solution for Ubuntu 24.04 LTS diskless servers using iPXE for HTTP boot, SFC network driver for 40G networks (MTU 9000), and layered SquashFS filesystems.
+A PXE boot solution for Ubuntu 24.04 LTS diskless servers using iPXE for HTTP boot, an HTTP-served custom live-server ISO, SFC/virtio network driver support, MTU 9000, cloud-init, and optional NFS.
 
 ## Overview
 
@@ -10,7 +10,7 @@ This project builds a complete iPXE boot stack—including the kernel, initrd, a
 
 - **PXE Network Boot** - Boot servers from network via iPXE
 - **40G Network Support** - SFC driver with MTU 9000 jumbo frames
-- **Layered Filesystem** - SquashFS with overlay and NFS layers
+- **ISO-over-HTTP Boot** - Custom Ubuntu Server live ISO fetched by casper
 - **Diskless Operation** - No local storage required
 - **Multi-Node Support** - Deploy on multiple nodes simultaneously
 - **Production Ready** - Tested on physical hardware and VMs
@@ -21,8 +21,8 @@ This project builds a complete iPXE boot stack—including the kernel, initrd, a
 
 ```bash
 cd docker
-docker compose up --build base-os
-docker compose up --build apps
+docker compose --progress=plain up --build iso
+docker compose -f docker-compose.http.yml up -d
 ```
 
 ### Start HTTP Server
@@ -33,9 +33,10 @@ docker compose -f docker-compose.http.yml up -d
 
 ### Boot a Node
 
-1. Configure DHCP server to point to: `http://<server-ip>:8080/ubuntu/boot.ipxe`
+1. Configure DHCP/iPXE to point to: `http://<server-ip>:8080/boot.ipxe`
 2. Power on server with PXE enabled
-3. Server boots into Ubuntu 24.04 LTS
+3. Server loads `/iso/casper/vmlinuz`, `/iso/casper/initrd`, and `/iso/ubuntu-24.04-custom.iso`
+4. Cloud-init reads NoCloud data from `/cloud-init/`
 
 ## Architecture
 

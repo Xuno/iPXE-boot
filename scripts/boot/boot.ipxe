@@ -1,31 +1,32 @@
-#!/ipxe
+#!ipxe
 
-set base-url http://localhost:8080/iso
-set iso-url http://localhost:8080/iso/ubuntu-24.04-custom.iso
-set boots-url http://localhost:8080/boots/ubuntu/current
-set layer-leaf apps.filesystem.squashfs
-set timeout 10
+set mtu 9000
+set http-port 80
+set iso-name ubuntu-24.04-custom.iso
 
 echo =================================================
-echo Ubuntu 24.04 LTS Custom Boot - PXE/iPXE
+echo Ubuntu 24.04 LTS Server ISO Boot - iPXE over HTTP
 echo =================================================
 
-# Configure MTU for 40G networks (jumbo frames)
-set net0/mtu 9000
+dhcp || goto failed
+set net0/mtu ${mtu} || echo Could not set MTU ${mtu} in iPXE
 
-# DHCP boot
-dhcp
+isset ${boot-server} || set boot-server ${next-server}
+isset ${boot-url} || set boot-url http://${boot-server}:${http-port}
 
-# Set MTU if not already set
-set net0/mtu 9000
+echo Boot URL: ${boot-url}
+echo ISO: ${boot-url}/iso/${iso-name}
 
-echo Checking for ISO file availability...
+kernel ${boot-url}/iso/casper/vmlinuz \
+    boot=casper \
+    netboot=url \
+    url=${boot-url}/iso/${iso-name} \
+    ip=dhcp \
+    ds=nocloud-net;s=${boot-url}/cloud-init/ \
+    ---
+initrd ${boot-url}/iso/casper/initrd
+boot || goto failed
 
-# Try ISO boot first
-chain http://${iso-url} || {
-  echo "ISO not available, trying PXE layered boot..."
-  chain http://${boots-url}/boot.ipxe || {
-    echo "PXE boot failed, aborting."
-    halt
-  }
-}
+:failed
+echo iPXE boot failed
+shell
