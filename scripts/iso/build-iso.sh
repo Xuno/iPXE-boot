@@ -1,11 +1,12 @@
 #!/bin/bash
-set -euo pipefail
+#set -euo pipefail
 
 UBUNTU_ISO_URL="${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso}"
 VERIFY_UBUNTU_ISO="${VERIFY_UBUNTU_ISO:-1}"
 CUSTOM_ISO_NAME="${CUSTOM_ISO_NAME:-ubuntu-24.04-custom.iso}"
 OUT_DIR="${OUT_DIR:-/out}"
 WORK="${WORK:-/tmp/iso-work}"
+LIVE_SQUASHFS_PATH="${LIVE_SQUASHFS_PATH:-/casper/ubuntu-server-minimal.squashfs}"
 
 RUST_VERSION="${RUST_VERSION:-1.94.1}"
 RUST_ARCH="${RUST_ARCH:-x86_64-unknown-linux-gnu}"
@@ -14,7 +15,7 @@ RUST_KEY_URL="${RUST_KEY_URL:-https://keybase.io/rust/pgp_keys.asc}"
 RUST_SIGNING_FPR="${RUST_SIGNING_FPR:-108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE}"
 
 UBUNTU_ISO_FILE="${UBUNTU_ISO_URL##*/}"
-BASE_ISO="${WORK}/${UBUNTU_ISO_FILE}"
+BASE_ISO="${OUT_DIR}/${UBUNTU_ISO_FILE}"
 ROOTFS="${WORK}/rootfs"
 NEW_SQUASHFS="${WORK}/filesystem.squashfs"
 FILESYSTEM_SIZE="${WORK}/filesystem.size"
@@ -39,29 +40,45 @@ require_file() {
 
 rm -rf "${WORK}"
 mkdir -p "${WORK}" "${OUT_DIR}" "${OUT_DIR}/casper"
+umask 0000
 
-log "Downloading Ubuntu Server live ISO"
-curl -fL --retry 5 --retry-delay 5 -o "${BASE_ISO}" "${UBUNTU_ISO_URL}"
+if [ ! -f "${BASE_ISO}" ];then
+ log "Downloading Ubuntu Server live ISO '${UBUNTU_ISO_URL}' to '${BASE_ISO}'"
+ curl -fL --retry 5 --retry-delay 5 -o "${BASE_ISO}" "${UBUNTU_ISO_URL}"
+fi
 
 if [ "${VERIFY_UBUNTU_ISO}" = "1" ]; then
-    log "Verifying Ubuntu ISO checksum"
     ISO_DIR_URL="${UBUNTU_ISO_URL%/*}"
     ISO_FILE_NAME="${UBUNTU_ISO_FILE}"
-    curl -fL --retry 5 --retry-delay 5 -o "${WORK}/SHA256SUMS" "${ISO_DIR_URL}/SHA256SUMS"
-    grep -E "[ *]${ISO_FILE_NAME}$" "${WORK}/SHA256SUMS" > "${WORK}/SHA256SUMS.single"
-    (cd "${WORK}" && sha256sum -c SHA256SUMS.single)
+    BASE_ISO_DIR="${BASE_ISO%/*}"
+    log "Verifying Ubuntu ISO checksum  ISO_DIR_URL=${ISO_DIR_URL} BASE_ISO_DIR=${BASE_ISO_DIR} "
+    if [ ! -f "${BASE_ISO_DIR}/SHA256SUMS.single" ];then
+      log "Downloading Ubuntu ISO SHA256SUMS  ISO_DIR_URL=${ISO_DIR_URL} "
+      curl -fL --retry 5 --retry-delay 5 -o "${WORK}/SHA256SUMS" "${ISO_DIR_URL}/SHA256SUMS"
+      grep -E "[ *]${ISO_FILE_NAME}$" "${WORK}/SHA256SUMS" > "${BASE_ISO_DIR}/SHA256SUMS.single"
+    fi
+    (cd "${BASE_ISO_DIR}" && sha256sum -c SHA256SUMS.single)
 fi
 
-log "Extracting live filesystem"
-SQUASHFS_PATH="$(xorriso -indev "${BASE_ISO}" -find /casper -name '*.squashfs' -print 2>/dev/null | grep -v '/installer.squashfs$' | head -n 1)"
-if [ -z "${SQUASHFS_PATH}" ]; then
-    echo "No casper squashfs found in ${BASE_ISO}" >&2
+log "Detecting live filesystem layers"
+SQUASHFS_LIST="${WORK}/squashfs.list"
+xorriso -indev "${BASE_ISO}" -find /casper -name '*.squashfs' 2>/dev/null \
+    | sed "s/'//g" \
+    | grep -E "^/casper/.*\.squashfs$" > "${SQUASHFS_LIST}" || true
+
+if ! grep -qxF "${LIVE_SQUASHFS_PATH}" "${SQUASHFS_LIST}"; then
+    echo "Requested live squashfs was not found: ${LIVE_SQUASHFS_PATH}" >&2
+    echo "Available squashfs files:" >&2
+    cat "${SQUASHFS_LIST}" >&2
     exit 1
 fi
+SQUASHFS_PATH="${LIVE_SQUASHFS_PATH}"
 SQUASHFS_BASENAME="${SQUASHFS_PATH##*/}"
 SQUASHFS_STEM="${SQUASHFS_BASENAME%.squashfs}"
 SIZE_PATH="/casper/${SQUASHFS_STEM}.size"
 MANIFEST_PATH="/casper/${SQUASHFS_STEM}.manifest"
+
+log "Extracting ${SQUASHFS_PATH}"
 xorriso -osirrox on -indev "${BASE_ISO}" -extract "${SQUASHFS_PATH}" "${WORK}/base-filesystem.squashfs" >/dev/null 2>&1
 unsquashfs -q -d "${ROOTFS}" "${WORK}/base-filesystem.squashfs"
 

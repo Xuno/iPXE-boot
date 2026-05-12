@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xorriso \
     xz-utils \
     zstd \
+    iproute2 \
+    iputils-ping \
+    host \
     && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/iso/build-iso.sh /build.sh
