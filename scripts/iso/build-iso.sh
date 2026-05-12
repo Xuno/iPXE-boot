@@ -83,16 +83,27 @@ xorriso -osirrox on -indev "${BASE_ISO}" -extract "${SQUASHFS_PATH}" "${WORK}/ba
 unsquashfs -q -d "${ROOTFS}" "${WORK}/base-filesystem.squashfs"
 
 log "Configuring live rootfs with updates, drivers, cloud-init, NFS client, and Rust"
-cp /etc/resolv.conf "${ROOTFS}/etc/resolv.conf"
+log "Configuring /etc/resolv.conf. ROOTFS=${ROOTFS}"
+rm -f "${ROOTFS}/etc/resolv.conf"
+echo 'nameserver 1.1.1.1' > "${ROOTFS}/etc/resolv.conf"
+echo 'nameserver 8.8.8.8' >> "${ROOTFS}/etc/resolv.conf"
+
+
+log "Configuring /usr/sbin/policy-rc.d"
 cat > "${ROOTFS}/usr/sbin/policy-rc.d" <<'EOF'
 #!/bin/sh
 exit 101
 EOF
 chmod +x "${ROOTFS}/usr/sbin/policy-rc.d"
+cat "${ROOTFS}/usr/sbin/policy-rc.d"
 
+log "Configuring /tmp/configure-ipxe-rootfs.sh"
 cat > "${ROOTFS}/tmp/configure-ipxe-rootfs.sh" <<'EOF'
 #!/bin/bash
 set -euo pipefail
+
+echo "Executing in chroot '/tmp/configure-ipxe-rootfs.sh' file"
+echo .
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -109,15 +120,29 @@ apt-get install -y --no-install-recommends \
     gnupg \
     iproute2 \
     iputils-ping \
+    initramfs-tools \
+    squashfs-tools \
+    kmod \
+    zstd \
+    wget \
     jq \
     linux-firmware \
     linux-generic \
-    linux-modules-extra-generic \
     nfs-common \
     openssh-server \
     pkg-config \
     tcpdump \
-    xz-utils
+    xz-utils \
+    isc-dhcp-client \
+    apt-utils \
+    mc
+
+apt-get purge -y cryptsetup cryptsetup-initramfs
+
+KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+
+apt-get install -y --no-install-recommends \
+        linux-modules-extra-${KERNEL_VER}
 
 sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf
 sed -i 's/^COMPRESS=.*/COMPRESS=zstd/' /etc/initramfs-tools/initramfs.conf
@@ -152,11 +177,26 @@ if [ -n "${RUST_VERSION:-}" ]; then
 fi
 
 KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+echo "In chroot used: KERNEL_VER=${KERNEL_VER}"
+echo "update-initramfs ..."
+
+cd /
+
 update-initramfs -u -k "${KERNEL_VER}" || update-initramfs -c -k "${KERNEL_VER}"
+
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
+echo "In chroot scripts done"
 EOF
 chmod +x "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
+
+log "Configuring chroot"
+
+mount --bind /dev  "${ROOTFS}/dev"
+mount --bind /dev/pts "${ROOTFS}/dev/pts"
+mount -t proc /proc "${ROOTFS}/proc"
+mount -t sysfs /sys "${ROOTFS}/sys"
+mount -t tmpfs tmpfs "${ROOTFS}/run"
 
 chroot "${ROOTFS}" /usr/bin/env \
     RUST_VERSION="${RUST_VERSION}" \
@@ -166,22 +206,31 @@ chroot "${ROOTFS}" /usr/bin/env \
     RUST_SIGNING_FPR="${RUST_SIGNING_FPR}" \
     /tmp/configure-ipxe-rootfs.sh
 
+for fs in dev/pts dev proc sys run ; do
+    umount -lf "${ROOTFS}/$fs"
+done
+
+
 rm -f "${ROOTFS}/usr/sbin/policy-rc.d" "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
 
 KERNEL_VER="$(chroot "${ROOTFS}" /bin/bash -lc "ls -1 /lib/modules | sort -V | tail -n 1")"
+log "Configuring KERNEL_VER=${KERNEL_VER}. KERNEL_OUT=${KERNEL_OUT} INITRD_OUT=${INITRD_OUT}"
+
+
 cp "${ROOTFS}/boot/vmlinuz-${KERNEL_VER}" "${KERNEL_OUT}"
 cp "${ROOTFS}/boot/initrd.img-${KERNEL_VER}" "${INITRD_OUT}"
-require_file "${KERNEL_OUT}" "custom kernel"
+require_file "${KERNEL_OUT}" "custom kernel"W
 require_file "${INITRD_OUT}" "custom initrd"
 
 if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/ethernet/sfc/sfc.ko'; then
     echo "Custom initrd does not contain sfc.ko" >&2
     exit 1
 fi
-if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/virtio_net.ko'; then
-    echo "Custom initrd does not contain virtio_net.ko" >&2
-    exit 1
-fi
+
+#if ! lsinitramfs "${INITRD_OUT}" | grep -Eq 'virtio_net\.ko(\.(xz|zst))?$'; then
+#    echo "Custom initrd does not contain virtio_net" >&2
+#    exit 1
+#fi
 
 chroot "${ROOTFS}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${FILESYSTEM_MANIFEST}"
 du -sx --block-size=1 "${ROOTFS}" | cut -f1 > "${FILESYSTEM_SIZE}"

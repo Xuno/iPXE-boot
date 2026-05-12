@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     iputils-ping \
     host \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 COPY scripts/iso/build-iso.sh /build.sh
