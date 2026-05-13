@@ -151,8 +151,13 @@ for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc; do
 done
 
 cat > /etc/cloud/cloud.cfg.d/99-ipxe-nocloud.cfg <<'EOC'
-datasource_list: [ NoCloud, ConfigDrive, None ]
+datasource_list: [ NoCloud, None ]
 EOC
+
+# Disable subiquity/installer services entirely
+systemctl disable subiquity || true
+systemctl mask subiquity || true
+systemctl disable ubuntu-advantage || true
 
 mkdir -p /opt/rust
 if [ -n "${RUST_VERSION:-}" ]; then
@@ -235,6 +240,20 @@ fi
 chroot "${ROOTFS}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${FILESYSTEM_MANIFEST}"
 du -sx --block-size=1 "${ROOTFS}" | cut -f1 > "${FILESYSTEM_SIZE}"
 
+log "Extracting and patching grub.cfg"
+GRUB_CFG="${WORK}/grub.cfg"
+xorriso -osirrox on -indev "${BASE_ISO}" \
+    -extract /boot/grub/grub.cfg "${GRUB_CFG}" >/dev/null 2>&1
+
+# Remove 'maybe-ubiquity', 'autoinstall', and quiet/splash that mask cloud-init
+# Add 'ds=nocloud' so cloud-init datasource is explicit
+sed -i \
+    -e 's/maybe-ubiquity//g' \
+    -e 's/autoinstall//g' \
+    -e 's/quiet splash//g' \
+    -e 's|linux\s*/casper/vmlinuz.*|& ds=nocloud cloud-init=enabled|' \
+    "${GRUB_CFG}"
+
 log "Repacking live filesystem"
 mksquashfs "${ROOTFS}" "${NEW_SQUASHFS}" -comp zstd -b 1M -noappend -no-recovery
 
@@ -247,7 +266,13 @@ xorriso -indev "${BASE_ISO}" \
     -map "${KERNEL_OUT}" /casper/vmlinuz \
     -map "${INITRD_OUT}" /casper/initrd \
     -map "${FILESYSTEM_SIZE}" "${SIZE_PATH}" \
-    -map "${FILESYSTEM_MANIFEST}" "${MANIFEST_PATH}"
+    -map "${FILESYSTEM_MANIFEST}" "${MANIFEST_PATH}" \
+    -map "${GRUB_CFG}" /boot/grub/grub.cfg \
+    -rm /casper/ubuntu-server-minimal.ubuntu-server.installer.squashfs \
+    -rm /casper/ubuntu-server-minimal.ubuntu-server.installer.generic.squashfs \
+    -rm /casper/ubuntu-server-minimal.ubuntu-server.installer.generic-hwe.squashfs \
+    -rm /casper/ubuntu-server-minimal.ubuntu-server.squashfs \
+    -rm /casper/install-sources.yaml
 
 mv -f "${TMP_ISO}" "${FINAL_ISO}"
 cp -f "${KERNEL_OUT}" "${OUT_DIR}/casper/vmlinuz"

@@ -5,14 +5,14 @@ package_update: false
 package_upgrade: false
 
 users:
-  - default
-  - name: admin
-    gecos: Admin User
+  - name: dev
+    lock_passwd: false
+    passwd: '$6$...'          # for console fallback: openssl passwd -6 'your-password-here'
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3... # for normal SSH access
     groups: [adm, sudo]
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
-    lock_passwd: true
-    ssh_authorized_keys: []
 
 ssh_pwauth: false
 disable_root: true
