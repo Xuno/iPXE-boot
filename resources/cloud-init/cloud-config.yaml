@@ -1,20 +1,23 @@
 #cloud-config
-hostname: ubuntu-server
+
+preserve_hostname: false
 manage_etc_hosts: true
+
 package_update: false
 package_upgrade: false
 
 users:
-  - default
-  - name: admin
-    gecos: Admin User
+  - name: dev
+    lock_passwd: false
+    passwd: '$6....'
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA....
     groups: [adm, sudo]
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
-    lock_passwd: true
-    ssh_authorized_keys: []
 
-ssh_pwauth: false
+#ssh_pwauth: false
+
 disable_root: true
 
 write_files:
@@ -29,8 +32,8 @@ write_files:
     permissions: '0644'
     content: |
       # Set NFS_SERVER by cloud-init/vendor-data for nodes that need the NFS data disk.
-      NFS_SERVER=""
-      NFS_EXPORT="/data/deployment"
+      NFS_SERVER="node01"
+      NFS_EXPORT="/srv/nfs/homes"
       NFS_MOUNTPOINT="/mnt/nfs"
       NFS_OPTIONS="vers=4.2,noauto,x-systemd.automount,_netdev,nconnect=8,rsize=1048576,wsize=1048576"
 
@@ -58,8 +61,25 @@ write_files:
       net.ipv4.tcp_wmem = 4096 65536 134217728
 
 runcmd:
+  - |
+    HOSTNAME="$(grep '^HOSTNAME=' /run/systemd/netif/leases/* | head -n1 | cut -d= -f2)"
+
+    if [ -n "$HOSTNAME" ]; then
+      hostnamectl set-hostname "$HOSTNAME"
+
+      echo "$HOSTNAME" > /etc/hostname
+
+      if grep -q '^127.0.1.1' /etc/hosts; then
+        sed -i "s/^127.0.1.1.*/127.0.1.1 $HOSTNAME/" /etc/hosts
+      else
+        echo "127.0.1.1 $HOSTNAME" >> /etc/hosts
+      fi
+    fi
+
+    echo "runcmd hostname=$HOSTNAME" > /var/log/dhcp-hostname.log
+    echo "bootcmd  hsotname $HOSTNAME"
   - [ systemctl, enable, --now, ssh ]
   - [ sysctl, --system ]
   - [ /usr/local/sbin/configure-ipxe-nfs ]
 
-final_message: "Ubuntu 24.04 diskless server boot configuration completed."
+final_message: "Ubuntu diskless server boot configuration completed."
