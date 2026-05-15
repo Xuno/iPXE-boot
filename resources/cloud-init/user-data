@@ -9,9 +9,9 @@ package_upgrade: false
 users:
   - name: dev
     lock_passwd: false
-    passwd: '$6....'
+    passwd: '$6....'          # for console fallback: openssl passwd -6 'your-password-here'
     ssh_authorized_keys:
-      - ssh-ed25519 AAAA....
+      - ssh-ed25519 AAAA....   # for normal SSH access
     groups: [adm, sudo]
     shell: /bin/bash
     sudo: ['ALL=(ALL) NOPASSWD:ALL']
