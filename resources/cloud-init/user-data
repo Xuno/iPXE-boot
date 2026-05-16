@@ -78,6 +78,8 @@ runcmd:
 
     echo "runcmd hostname=$HOSTNAME" > /var/log/dhcp-hostname.log
     echo "bootcmd  hsotname $HOSTNAME"
+  - [ ln, -sf, /run/systemd/resolve/stub-resolv.conf, /etc/resolv.conf ]
+  - [ systemctl, restart, systemd-resolved ]
   - [ systemctl, enable, --now, ssh ]
   - [ sysctl, --system ]
   - [ /usr/local/sbin/configure-ipxe-nfs ]
