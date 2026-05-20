@@ -215,7 +215,7 @@ for fs in dev/pts dev proc sys run ; do
     umount -lf "${ROOTFS}/$fs"
 done
 
-rm -f "${ROOTFS}/etc/resolv.conf"
+#rm -f "${ROOTFS}/etc/resolv.conf"
 rm -f "${ROOTFS}/usr/sbin/policy-rc.d" "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
 
 KERNEL_VER="$(chroot "${ROOTFS}" /bin/bash -lc "ls -1 /lib/modules | sort -V | tail -n 1")"
