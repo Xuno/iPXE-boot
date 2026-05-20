@@ -182,6 +182,14 @@ EOC
 
 sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
 
+cat > /etc/netplan/00-global-dhcp-id.yaml <<'EOC'
+network:
+    version: 2
+    renderer: networkd
+    ethernets:
+      global-defaults:
+        dhcp-identifier: mac
+EOC
 
 # Disable subiquity/installer services entirely
 systemctl disable subiquity || true
