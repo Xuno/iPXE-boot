@@ -135,6 +135,9 @@ apt-get install -y --no-install-recommends \
     xz-utils \
     isc-dhcp-client \
     apt-utils \
+    ipmitool \
+    tmux \
+    htop \
     mc
 
 apt-get purge -y cryptsetup cryptsetup-initramfs
@@ -150,9 +153,35 @@ for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc; do
     grep -qxF "${module}" /etc/initramfs-tools/modules || printf '%s\n' "${module}" >> /etc/initramfs-tools/modules
 done
 
-cat > /etc/cloud/cloud.cfg.d/99-ipxe-nocloud.cfg <<'EOC'
+cat > /etc/cloud/cloud.cfg.d/91-ipxe-nocloud.cfg <<'EOC'
 datasource_list: [ NoCloud, None ]
 EOC
+
+cat > /etc/cloud/cloud.cfg.d/92-custom-networking.cfg <<'EOC'
+      network:
+        version: 2
+        ethernets:
+          default:
+            match:
+              name: "en*"
+            dhcp4: true
+            dhcp6: true
+            mtu: 9000
+            accept-ra: true
+            dhcp-identifier: mac
+EOC
+
+# IPMI Watchdog configure
+cat > /etc/modprobe.d/ipmi_watchdog.conf <<'EOC'
+options ipmi_watchdog start_now=0
+EOC
+
+cat > /etc/modules-load.d/ipmi_watchdog.conf <<'EOC'
+ipmi_watchdog
+EOC
+
+sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
+
 
 # Disable subiquity/installer services entirely
 systemctl disable subiquity || true
