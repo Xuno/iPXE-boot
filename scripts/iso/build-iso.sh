@@ -158,17 +158,17 @@ datasource_list: [ NoCloud, None ]
 EOC
 
 cat > /etc/cloud/cloud.cfg.d/92-custom-networking.cfg <<'EOC'
-      network:
-        version: 2
-        ethernets:
-          default:
-            match:
-              name: "en*"
-            dhcp4: true
-            dhcp6: true
-            mtu: 9000
-            accept-ra: true
-            dhcp-identifier: mac
+network:
+  version: 2
+  ethernets:
+    default:
+      match:
+        name: "en*"
+      dhcp4: true
+      dhcp6: true
+      mtu: 9000
+      accept-ra: true
+      dhcp-identifier: mac
 EOC
 
 # IPMI Watchdog configure
@@ -182,14 +182,15 @@ EOC
 
 sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
 
-cat > /etc/netplan/00-global-dhcp-id.yaml <<'EOC'
-network:
-    version: 2
-    renderer: networkd
-    ethernets:
-      global-defaults:
-        dhcp-identifier: mac
-EOC
+#cat > /etc/netplan/00-global-dhcp-id.yaml <<'EOC'
+#network:
+#    version: 2
+#    renderer: networkd
+#    ethernets:
+#      global-defaults:
+#        dhcp-identifier: mac
+#EOC
+#chmod 600 /etc/netplan/00-global-dhcp-id.yaml
 
 # Disable subiquity/installer services entirely
 systemctl disable subiquity || true
@@ -261,7 +262,7 @@ log "Configuring KERNEL_VER=${KERNEL_VER}. KERNEL_OUT=${KERNEL_OUT} INITRD_OUT=$
 
 cp "${ROOTFS}/boot/vmlinuz-${KERNEL_VER}" "${KERNEL_OUT}"
 cp "${ROOTFS}/boot/initrd.img-${KERNEL_VER}" "${INITRD_OUT}"
-require_file "${KERNEL_OUT}" "custom kernel"W
+require_file "${KERNEL_OUT}" "custom kernel"
 require_file "${INITRD_OUT}" "custom initrd"
 
 if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/ethernet/sfc/sfc.ko'; then
