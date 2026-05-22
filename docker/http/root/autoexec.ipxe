@@ -1,0 +1,7 @@
+#!ipxe
+
+# Tell iPXE to get an IP again (or use the one it has)
+#dhcp
+
+# Now pull the actual Ubuntu installer/kernel via HTTP (faster than TFTP)
+chain http://node01/boot.ipxe

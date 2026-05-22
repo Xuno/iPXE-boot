@@ -1,5 +1,0 @@
-# /etc/fstab: static file system information.
-#
-# <file system>       <mount point>   <type>  <options>       <dump>  <pass>
-LABEL=cloudimg-rootfs /               squashfs  defaults,errors=remount-ro  0  1
-# NFS is configured by cloud-init only when NFS_SERVER is set in /etc/default/ipxe-nfs.

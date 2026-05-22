@@ -1,32 +1,218 @@
 #!ipxe
 
-set mtu 9000
-set http-port 80
-set iso-name ubuntu-24.04-custom.iso
+set base http://node01
+set base-boots ${base}/boots
+set iso-ubuntu2404s ${base}/iso/ubuntu-24.04.4-live-server-amd64.iso
+set iso-ubuntu2604s ${base}/iso/ubuntu-26.04-live-server-amd64.iso
 
-echo =================================================
-echo Ubuntu 24.04 LTS Server ISO Boot - iPXE over HTTP
-echo =================================================
+menu Boot Menu
+item --gap -- ---- Operating Systems ----
+item ubuntu2404-custom-iso        Ubuntu 24.04 Server custom ISO
+item ubuntu        Ubuntu 24.04 Server Casper Current custom
+item ubuntu-       Ubuntu 24.04 Server Casper
+item ubuntu2404s-iso    Ubuntu 24.04 Server ISO boot
+item ubuntu2604s-iso    Ubuntu 26.04 Server ISO boot
+item --gap -- ---- Operating Systems Installer ----
+item ubuntuinst    Ubuntu 24.04 Server Install
 
-dhcp || goto failed
-set net0/mtu ${mtu} || echo Could not set MTU ${mtu} in iPXE
+item --gap -- ---- Utilities ----
+item netboot       https://boot.netboot.xyz
+item --gap -- ---- SFC  ----
+item sfupdate-iso       amd sfc update iso
+item sfupdate-kern      amd sfc update kern
+item shell         iPXE Shell
 
-isset ${boot-server} || set boot-server ${next-server}
-isset ${boot-url} || set boot-url http://${boot-server}:${http-port}
+item --gap -- ---- Local ----
+item local         Boot from local disk
 
-echo Boot URL: ${boot-url}
-echo ISO: ${boot-url}/iso/${iso-name}
+#choose --default sfupdate-iso --timeout 5000 target && goto ${target}
+choose --default ubuntu2404-custom-iso --timeout 1500 target && goto ${target}
 
-kernel ${boot-url}/iso/casper/vmlinuz \
-    boot=casper \
+:ubuntu
+set base-url ${base-boots}/ubuntu/current
+set layer-leaf apps.filesystem.squashfs
+
+kernel ${base-url}/vmlinuz \
+    initrd=initrd  \
     netboot=url \
-    url=${boot-url}/iso/${iso-name} \
+    boot=casper \
     ip=dhcp \
-    ds=nocloud-net;s=${boot-url}/cloud-init/ \
+    mtu=9000 \
+    root=/dev/ram0 \
+    cloud-init=disabled \
+    fetch=${base-url}/filesystem.squashfs layerfs-path=${layer-leaf} \
+    fsck.mode=skip \
+    runtime-config=true \
+    ro \
+    debug loglevel=7 printk.time=1 \
     ---
-initrd ${boot-url}/iso/casper/initrd
+
+initrd ${base-url}/initrd
+boot
+
+:ubuntu2204s-iso
+set base-url ${base-boots}/ubuntu2404s
+
+kernel ${base-url}/casper/vmlinuz
+imgargs vmlinuz boot=casper \
+  ip=dhcp \
+  mtu=9000 \
+  root=/dev/ram0  \
+  cloud-config-url=/dev/null \
+  fsck.mode=skip \
+  url=${iso-ubuntu2204s}
+
+initrd ${base-url}/casper/initrd
+
 boot || goto failed
 
-:failed
-echo iPXE boot failed
+:ubuntu2604s-iso
+set base-url ${base-boots}/ubuntu2604s
+
+kernel ${base-url}/casper/vmlinuz
+imgargs vmlinuz boot=casper \
+  ip=dhcp \
+  mtu=9000 \
+  root=/dev/ram0  \
+  cloud-config-url=/dev/null \
+  fsck.mode=skip \
+  url=${iso-ubuntu2604s}
+
+initrd ${base-url}/casper/initrd
+
+boot || goto failed
+
+
+:ubuntu-
+kernel ${base-boots}/ubuntu-/casper/vmlinuz \
+    boot=casper \
+    netboot=url \
+    url=${iso-ubuntu} \
+    ip=dhcp \
+    mtu=9000 \
+    toram \
+    fsck.mode=skip \
+    console=tty0 \
+    console=ttyS0,115200n8 \
+    systemd.mask=apt-daily.service \
+    systemd.mask=apt-daily-upgrade.service \
+    systemd.mask=snapd.service \
+    ds=nocloud;s=${base}/cloud-init/
+
+initrd ${base-boots}/ubuntu-/casper/initrd
+boot
+
+:ubuntuinst
+set base-url ${base-boots}/ubuntu-/casper
+
+kernel ${base-url}/vmlinuz initrd=initrd \
+ boot=live \
+ union=overlay \
+ config components \
+ noswap \
+ ip=dhcp \
+ toram \
+ root=/dev/ram0 \
+ fetch=${base-url}/ubuntu-server-minimal.ubuntu-server.installer.squashfs \
+ fsck.mode=skip \
+ debug ignore_loglevel
+
+initrd ${base-url}/initrd
+
+boot || goto failed
+
+#    fetch=${base-url}/casper/ubuntu-server-minimal.ubuntu-server.installer.squashfs \
+
+
+:netboot
+####       boot.netboot.xyz initial loader        ####
+#### see https://netboot.xyz for more information ####
+set conn_type https
+chain --autofree https://boot.netboot.xyz/menu.ipxe || echo HTTPS failed... attempting HTTP...
+set conn_type http
+chain --autofree http://boot.netboot.xyz/menu.ipxe || echo HTTP failed, localbooting...
+goto failed
+
+
+:ubuntu2404-custom-iso
+set mtu 9000
+
+set iso-name ubuntu-24.04-custom.iso
+#set iso-name ubuntu-24.04.4-live-server-amd64.iso
+
+set base-iso ${base}/iso/${iso-name}
+set base-url ${base-boots}/ubuntu-custom-iso
+
+# Convert the MAC address to a clean string (remove colons)
+set mac_clean ${netX/mac:hexraw}
+set custom_id ${mac_clean}00000000000000000000
+# Grab the hostname assigned by the DHCP server
+set assigned_hostname ${hostname}
+
+# Fallback pattern if the DHCP server didn't send a hostname
+isset ${assigned_hostname} || set assigned_hostname node-${mac_clean}
+
+kernel ${base-url}/casper/vmlinuz \
+  boot=casper \
+  mtu=${mtu} \
+  netboot=url \
+  url=${base-iso} \
+  ip=dhcp \
+  toram \
+  systemd.machine_id=${custom_id} \
+  hostname=${assigned_hostname} \
+  fsck.mode=skip \
+  console=tty0 \
+  console=ttyS0,115200n8 \
+  systemd.unit=multi-user.target \
+  systemd-networkd.global.dhcp-identifier=mac \
+  systemd.mask=systemd-networkd-wait-online.service \
+  systemd.setenv=SYSTEMD_NETWORKD_WAIT_ONLINE_TIMEOUT=0 \
+  systemd.mask=multipathd.service \
+  systemd.mask=multipathd.socket \
+  nomodeset \
+  vga=normal \
+  ds=nocloud;s=${base-url}/cloud-init/
+
+initrd ${base-url}/casper/initrd
+
+boot || goto failed
+
+:sfupdate-iso
+
+set base-iso ${base}/iso/sfutils-8.3.3.1000.iso
+
+#chain ${base}/boots/sfcboot/EFI/boot/grubx64.efi
+
+sanboot --drive 0x80 ${base-iso}
+
+
+
+:sfupdate-kern
+echo SFC NIC Update
+set base-url ${base-boots}/sfcboot/live
+
+# Boot the kernel and pass arguments telling it where to find the root filesystem
+kernel ${base-url}/vmlinuz boot=live  toram initrd=initrd.img
+
+# Load the initrd into memory
+initrd ${base-url}/initrd.img
+
+# Fire up the live Linux environment
+boot
+
+goto failed
+
+
+:shell
+echo Dropping to iPXE shell
 shell
+
+:local
+echo Booting from local disk
+exit 0
+
+:failed
+echo Boot failed
+prompt Press any key to return to menu
+goto start

@@ -1,19 +1,25 @@
 # iPXE Bootable Ubuntu 24.04 LTS Diskless Server
 
-A PXE boot solution for Ubuntu 24.04 LTS diskless servers using iPXE for HTTP boot, an HTTP-served custom live-server ISO, SFC/virtio network driver support, MTU 9000, cloud-init, and optional NFS.
+A PXE boot solution for Ubuntu 24.04 LTS diskless servers using iPXE for HTTP boot, including a custom live-server ISO, SFC/virtio network driver support, MTU 9000, cloud-init, and optional NFS.
 
 ## Overview
 
-This project builds a complete iPXE boot stack—including the kernel, initrd, and layered filesystems—deployed via a local HTTP server for PXE network booting. Designed for production diskless servers with 40G network infrastructure (Sonic switch).
+This project provides an iPXE boot stack—including the kernel, initrd, and filesystem images—deployed via a local HTTP server for network booting. Designed for production diskless servers with 40G network infrastructure.
 
-## Key Features
+## Project Structure
 
-- **PXE Network Boot** - Boot servers from network via iPXE
-- **40G Network Support** - SFC driver with MTU 9000 jumbo frames
-- **ISO-over-HTTP Boot** - Custom Ubuntu Server live ISO fetched by casper
-- **Diskless Operation** - No local storage required
-- **Multi-Node Support** - Deploy on multiple nodes simultaneously
-- **Production Ready** - Tested on physical hardware and VMs
+- `docker/`: Contains build scripts, Dockerfiles, and `docker-compose` configurations.
+- `docker/http/`: The content directory for the HTTP server, which serves iPXE boot files, scripts, and ISO images.
+- `docs/`: Additional documentation.
+- `nfs/`: NFS configuration files.
+
+## Features
+
+- **PXE Network Boot**: Boot servers from the network via iPXE.
+- **40G Network Support**: SFC driver with MTU 9000 jumbo frames.
+- **ISO-over-HTTP Boot**: Custom Ubuntu Server live ISO fetched by casper.
+- **Diskless Operation**: No local storage required on the client nodes.
+- **Production Ready**: Tested on physical hardware and VMs.
 
 ## Quick Start
 
@@ -21,22 +27,49 @@ This project builds a complete iPXE boot stack—including the kernel, initrd, a
 
 ```bash
 cd docker
-docker compose --progress=plain up --build iso
-docker compose -f docker-compose.http.yml up -d
+bash -c build.sh
+```
+or 
+```bash
+cd docker
+docker compose --progress=plain up --build 
+docker compose down
 ```
 
 ### Start HTTP Server
 
 ```bash
+cd docker
 docker compose -f docker-compose.http.yml up -d
 ```
 
 ### Boot a Node
 
-1. Configure DHCP/iPXE to point to: `http://<server-ip>:8080/boot.ipxe`
-2. Power on server with PXE enabled
-3. Server loads `/iso/casper/vmlinuz`, `/iso/casper/initrd`, and `/iso/ubuntu-24.04-custom.iso`
-4. Cloud-init reads NoCloud data from `/cloud-init/`
+1. **Configure DHCP/PXE Server**  
+   Set up your DHCP/PXE server to point clients to the iPXE bootloader via TFTP. The bootloader file is located at
+   `http/root/boot.efi` for UEFI systems.
+
+2. **Power On the Server**  
+   Enable PXE boot in the BIOS/UEFI settings and power on the target server.
+
+3. **Load iPXE Bootloader**  
+   The system's firmware loads `boot.efi` via PXE and executes the embedded iPXE script `autoexec.ipxe` (located at
+   `http/root/autoexec.ipxe`).
+
+4. **Redirect to Boot Menu**  
+   The `autoexec.ipxe` script automatically redirects to `http://<server-ip>/boot.ipxe`, which is served by the Nginx HTTP server
+   from `http/root/boot.ipxe`.
+
+5. **Select Boot Option**  
+   The `boot.ipxe` script presents a boot menu. By default, it boots "Ubuntu 24.04 Server custom ISO".
+
+6. **Load Kernel and Initrd**  
+   The server fetches the kernel (`/boots/ubuntu-custom-iso/casper/vmlinuz`), initial ramdisk (
+   `/boots/ubuntu-custom-iso/casper/initrd`), and the custom ISO image (`/iso/ubuntu-24.04-custom.iso`) over HTTP.
+
+7. **Initialize with Cloud-Init**  
+   Cloud-init reads the NoCloud configuration data from `/boots/ubuntu-custom-iso/cloud-init/` to configure the system on first
+   boot.
 
 ## Architecture
 
@@ -81,24 +114,6 @@ docker compose -f docker-compose.http.yml up -d
 - **SFC Driver** - Standard SFC driver for Sonic switch 40G NICs
 - **Testing Framework** - Unit and integration tests without Docker
 
-## Testing
-
-Run tests directly on hardware/VMs:
-
-```bash
-cd tests
-make test  # Run all tests
-make unit  # Run unit tests
-make test-ipxe  # Run iPXE boot tests
-```
-
-## Documentation
-
-- [Deployment Guide](docs/DEPLOYMENT.md) - Complete deployment instructions
-- [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and fixes
-- [Layered Filesystem](docs/layered-filesystem.md) - Layer configuration details
-- [Project Analysis](PROJECT_ANALYSIS.md) - Component breakdown
-
 ## Requirements
 
 - Physical servers with 40G NICs (Sonic switch compatible)
@@ -110,13 +125,5 @@ make test-ipxe  # Run iPXE boot tests
 ## Quick Links
 
 - Build: `docker/build.sh`
-- Test: `tests/test-ipxe-boot.sh all`
-- HTTP Server: `docker/docker-compose.http.yml`
+- HTTP Server: `docker compose -f docker-compose.http.yml up --build`
 
-## License
-
-This project is provided as-is for production use.
-
-## Support
-
-For issues or questions, refer to the [Troubleshooting Guide](docs/TROUBLESHOOTING.md) or check the test suite output.

@@ -1,10 +1,11 @@
 #!/bin/bash
-#set -euo pipefail
+set -euo pipefail
 
 UBUNTU_ISO_URL="${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso}"
 VERIFY_UBUNTU_ISO="${VERIFY_UBUNTU_ISO:-1}"
 CUSTOM_ISO_NAME="${CUSTOM_ISO_NAME:-ubuntu-24.04-custom.iso}"
 OUT_DIR="${OUT_DIR:-/out}"
+
 WORK="${WORK:-/tmp/iso-work}"
 LIVE_SQUASHFS_PATH="${LIVE_SQUASHFS_PATH:-/casper/ubuntu-server-minimal.squashfs}"
 
@@ -263,6 +264,7 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
 echo "In chroot scripts done"
 EOF
+
 chmod +x "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
 
 log "Configuring chroot"
