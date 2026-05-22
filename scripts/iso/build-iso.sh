@@ -103,6 +103,7 @@ cat > "${ROOTFS}/tmp/configure-ipxe-rootfs.sh" <<'EOF'
 set -euo pipefail
 
 echo "Executing in chroot '/tmp/configure-ipxe-rootfs.sh' file"
+echo "--------------------------------------------------------"
 echo .
 
 export DEBIAN_FRONTEND=noninteractive
@@ -142,11 +143,14 @@ apt-get install -y --no-install-recommends \
 
 apt-get purge -y cryptsetup cryptsetup-initramfs
 
-# 2. Dynamically resolve the absolute latest installed kernel version securely
-KERNEL_VER="$(linux-version list | sort -V | tail -n 1)"
-if [ -z "$KERNEL_VER" ]; then
+# 2. Dynamically resolve the absolute latest active kernel version securely
+if command -v linux-version >/dev/null 2>&1; then
+    KERNEL_VER="$(linux-version list | sort -V | tail -n 1)"
+else
     KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
 fi
+
+echo "Detected target kernel variant: ${KERNEL_VER}"
 
 # 3. Install the extra storage/network filesystem drivers
 apt-get install -y --no-install-recommends \
@@ -157,9 +161,38 @@ apt-get install -y --no-install-recommends \
 sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf
 sed -i 's/^COMPRESS=.*/COMPRESS=zstd/' /etc/initramfs-tools/initramfs.conf
 
-for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc; do
+# 5. Force-feed high-performance network (Solarflare) and network filesystems (NFSv4)
+echo "Injecting mandatory netboot modules..."
+for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc sunrpc nfs nfsv4 ipmi_watchdog; do
     grep -qxF "${module}" /etc/initramfs-tools/modules || printf '%s\n' "${module}" >> /etc/initramfs-tools/modules
 done
+
+# 6. Rebuild the initramfs image payload securely using your specific configs
+echo "Compiling final runtime initramfs payload for KERNEL_VER=${KERNEL_VER}..."
+cd /
+
+# We force a fresh creation (-c) first to ensure our injected modules are entirely baked in,
+# falling back to an update (-u) only if structural system variables require it.
+update-initramfs -c -k "${KERNEL_VER}" || update-initramfs -u -k "${KERNEL_VER}"
+
+# 7. Permanent Systemd Unit Sanitization
+echo "Applying systemd target overrides and service masking..."
+
+# Disable subiquity/installer services entirely
+systemctl disable subiquity || true
+systemctl mask subiquity || true
+systemctl disable ubuntu-advantage || true
+
+# Completely disable the multipath service stack right inside the OS root
+systemctl mask multipathd.service || true
+systemctl mask multipathd.socket || true
+
+# Prevent network wait loops from bottlenecking deployment targets
+systemctl disable systemd-networkd-wait-online.service || true
+systemctl mask systemd-networkd-wait-online.service || true
+
+
+# CLOUD-INIT
 
 cat > /etc/cloud/cloud.cfg.d/91-ipxe-nocloud.cfg <<'EOC'
 datasource_list: [ NoCloud, None ]
@@ -200,17 +233,10 @@ sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
 #EOC
 #chmod 600 /etc/netplan/00-global-dhcp-id.yaml
 
-# Disable subiquity/installer services entirely
-systemctl disable subiquity || true
-systemctl mask subiquity || true
-systemctl disable ubuntu-advantage || true
 
-# Completely disable the multipath service so it doesn't try to start
-systemctl mask multipathd.service || true
 
-# Prevent wait-online from blocking the boot
-systemctl disable systemd-networkd-wait-online.service || true
 
+## APP LEVEL RUST
 mkdir -p /opt/rust
 if [ -n "${RUST_VERSION:-}" ]; then
     RUST_PKG="rust-${RUST_VERSION}-${RUST_ARCH}.tar.xz"
@@ -232,14 +258,6 @@ if [ -n "${RUST_VERSION:-}" ]; then
     ln -sfn /opt/rust/bin/cargo /usr/local/bin/cargo
     rm -rf "${TMP_RUST}" /root/.gnupg
 fi
-
-#KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
-echo "In chroot used: KERNEL_VER=${KERNEL_VER}"
-echo "update-initramfs ..."
-
-cd /
-
-update-initramfs -u -k "${KERNEL_VER}" || update-initramfs -c -k "${KERNEL_VER}"
 
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/*
