@@ -6,12 +6,15 @@ services:
     privileged: true
     image: ipxe-ubuntu-iso-builder
     build:
-      context: ..
-      dockerfile: docker/iso/Dockerfile
+      context: iso/
+      dockerfile: iso/Dockerfile
+      args:
+        UBUNTU_VER: ${UBUNTU_VER:-ubuntu:24:04}
     environment:
       UBUNTU_ISO_URL: ${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso}
       VERIFY_UBUNTU_ISO: ${VERIFY_UBUNTU_ISO:-1}
       LIVE_SQUASHFS_PATH: ${LIVE_SQUASHFS_PATH:-/casper/ubuntu-server-minimal.squashfs}
+      CUSTOM_ISO_NAME: ${CUSTOM_ISO_NAME:-ubuntu-24.04-custom.iso}
       RUST_VERSION: ${RUST_VERSION:-1.94.1}
       RUST_ARCH: ${RUST_ARCH:-x86_64-unknown-linux-gnu}
       RUST_DIST_BASE: ${RUST_DIST_BASE:-https://static.rust-lang.org/dist}
@@ -19,56 +22,6 @@ services:
       RUST_SIGNING_FPR: ${RUST_SIGNING_FPR:-108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE}
     volumes:
       - ./http/iso:/out
-
-
-  # The Base OS (Kernel + RootFS)
-  base-os:
-    image: ipxe-base-os
-    build:
-      context: ./base
-      dockerfile: Dockerfile
-    volumes:
-      - /srv/ipxe/boots/ubuntu:/docker
-      - ./entrypoint:/tmp/entrypoint
-
-    command: /bin/bash -c "/tmp/entrypoint/build.sh"
-
-  # HTTP Server for PXE Boot
-  http-server:
-    image: nginx:alpine
-    container_name: ipxe-http
-    ports:
-      - "8080:80"
-    volumes:
-      - ./http/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./http/boots:/var/www/boots:ro
-      - ./http/iso:/var/www/iso:ro
-      - ./http/root:/usr/share/nginx/html:ro
-    restart: unless-stopped
-    networks:
-      - ipxe-net
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # The App Layer (Dependent on Base OS)
-  apps:
-    build:
-      context: ./apps
-      dockerfile: Dockerfile
-      # This tells Docker that 'app-layer' relies on 'base-os'
-      additional_contexts:
-        base_image: service:base-os
-      args:
-        RUST_VERSION: ${RUST_VERSION:-1.94.1}
-        RUST_ARCH: ${RUST_ARCH:-x86_64-unknown-linux-gnu}
-        RUST_DIST_BASE: ${RUST_DIST_BASE:-https://static.rust-lang.org/dist}
-        RUST_KEY_URL: ${RUST_KEY_URL:-https://keybase.io/rust/pgp_keys.asc}
-        RUST_SIGNING_FPR: ${RUST_SIGNING_FPR:-108F66205EAEB0AAA8DD5E1C85AB96E6FA1BE5FE}
-    volumes:
-      - ./http/boots/ubuntu:/out
 
 networks:
   ipxe-net:

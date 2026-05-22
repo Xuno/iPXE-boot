@@ -1,2 +1,0 @@
-https://github.com/your-org/your-app/archive/refs/tags/v1.0.0.tar.gz
-https://github.com/your-org/rust-utils/archive/refs/tags/v1.2.0.tar.gz

@@ -1,0 +1,75 @@
+#cloud-config
+
+preserve_hostname: false
+manage_etc_hosts: true
+
+
+package_update: false
+package_upgrade: false
+
+users:
+  - name: dev
+    lock_passwd: false
+    passwd: '$6$...'          # change me
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC...  # change me
+    groups: [adm, sudo]
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+
+#ssh_pwauth: false
+
+disable_root: true
+
+growpart:
+  mode: 'off'
+
+write_files:
+
+  - path: /etc/profile.d/rust.sh
+    owner: root:root
+    permissions: '0644'
+    content: |
+      export PATH="/opt/rust/bin:${PATH}"
+
+  - path: /etc/default/ipxe-nfs
+    owner: root:root
+    permissions: '0644'
+    content: |
+      # Set NFS_SERVER by cloud-init/vendor-data for nodes that need the NFS data disk.
+      NFS_SERVER="node01"
+      NFS_EXPORT="/srv/nfs/homes"
+      NFS_MOUNTPOINT="/mnt/nfs"
+      NFS_OPTIONS="vers=4.2,noauto,x-systemd.automount,_netdev,nconnect=8,rsize=1048576,wsize=1048576"
+
+  - path: /usr/local/sbin/configure-ipxe-nfs.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+      . /etc/default/ipxe-nfs
+      [ -n "${NFS_SERVER}" ] || exit 0
+      mkdir -p "${NFS_MOUNTPOINT}"
+      line="${NFS_SERVER}:${NFS_EXPORT} ${NFS_MOUNTPOINT} nfs4 ${NFS_OPTIONS} 0 0"
+      grep -q " ${NFS_MOUNTPOINT} " /etc/fstab || printf '%s\n' "${line}" >> /etc/fstab
+      systemctl daemon-reload
+      systemctl restart remote-fs.target || true
+
+  - path: /etc/sysctl.d/90-40g-network.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      net.core.rmem_max = 134217728
+      net.core.wmem_max = 134217728
+      net.ipv4.tcp_rmem = 4096 87380 134217728
+      net.ipv4.tcp_wmem = 4096 65536 134217728
+
+runcmd:
+  - [ ln, -sf, /run/systemd/resolve/stub-resolv.conf, /etc/resolv.conf ]
+  - [ systemctl, restart, systemd-resolved ]
+  - [ systemctl, enable, --now, ssh ]
+  - [ sysctl, --system ]
+  - [ /usr/local/sbin/configure-ipxe-nfs.sh ]
+
+final_message: "Ubuntu  diskless server boot configuration completed."
