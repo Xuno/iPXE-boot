@@ -233,7 +233,7 @@ if [ -n "${RUST_VERSION:-}" ]; then
     rm -rf "${TMP_RUST}" /root/.gnupg
 fi
 
-KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+#KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
 echo "In chroot used: KERNEL_VER=${KERNEL_VER}"
 echo "update-initramfs ..."
 
