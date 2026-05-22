@@ -142,13 +142,21 @@ apt-get install -y --no-install-recommends \
 
 apt-get purge -y cryptsetup cryptsetup-initramfs
 
-KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+# 2. Dynamically resolve the absolute latest installed kernel version securely
+KERNEL_VER="$(linux-version list | sort -V | tail -n 1)"
+if [ -z "$KERNEL_VER" ]; then
+    KERNEL_VER="$(ls -1 /lib/modules | sort -V | tail -n 1)"
+fi
 
+# 3. Install the extra storage/network filesystem drivers
 apt-get install -y --no-install-recommends \
+        linux-image-${KERNEL_VER} \
+        linux-modules-${KERNEL_VER} \
         linux-modules-extra-${KERNEL_VER}
 
 sed -i 's/^MODULES=.*/MODULES=most/' /etc/initramfs-tools/initramfs.conf
 sed -i 's/^COMPRESS=.*/COMPRESS=zstd/' /etc/initramfs-tools/initramfs.conf
+
 for module in virtio virtio_ring virtio_pci virtio_net net_failover sfc; do
     grep -qxF "${module}" /etc/initramfs-tools/modules || printf '%s\n' "${module}" >> /etc/initramfs-tools/modules
 done
@@ -196,6 +204,12 @@ sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
 systemctl disable subiquity || true
 systemctl mask subiquity || true
 systemctl disable ubuntu-advantage || true
+
+# Completely disable the multipath service so it doesn't try to start
+systemctl mask multipathd.service || true
+
+# Prevent wait-online from blocking the boot
+systemctl disable systemd-networkd-wait-online.service || true
 
 mkdir -p /opt/rust
 if [ -n "${RUST_VERSION:-}" ]; then
