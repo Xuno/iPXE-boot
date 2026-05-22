@@ -195,7 +195,7 @@ systemctl mask systemd-networkd-wait-online.service || true
 # CLOUD-INIT
 
 cat > /etc/cloud/cloud.cfg.d/91-ipxe-nocloud.cfg <<'EOC'
-datasource_list: [ NoCloud, None ]
+datasource_list: [ "NoCloud", "None" ]
 EOC
 
 cat > /etc/cloud/cloud.cfg.d/92-custom-networking.cfg <<'EOC'
