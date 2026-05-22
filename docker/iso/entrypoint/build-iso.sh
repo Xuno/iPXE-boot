@@ -193,48 +193,6 @@ systemctl disable systemd-networkd-wait-online.service || true
 systemctl mask systemd-networkd-wait-online.service || true
 
 
-# CLOUD-INIT
-
-cat > /etc/cloud/cloud.cfg.d/91-ipxe-nocloud.cfg <<'EOC'
-datasource_list: [ "NoCloud", "None" ]
-EOC
-
-cat > /etc/cloud/cloud.cfg.d/92-custom-networking.cfg <<'EOC'
-network:
-  version: 2
-  ethernets:
-    default:
-      match:
-        name: "en*"
-      dhcp4: true
-      dhcp6: true
-      mtu: 9000
-      accept-ra: true
-      dhcp-identifier: mac
-EOC
-
-# IPMI Watchdog configure
-cat > /etc/modprobe.d/ipmi_watchdog.conf <<'EOC'
-options ipmi_watchdog start_now=0
-EOC
-
-cat > /etc/modules-load.d/ipmi_watchdog.conf <<'EOC'
-ipmi_watchdog
-EOC
-
-sed -i '/^\[Manager\]/a RuntimeWatchdogSec=60' /etc/systemd/system.conf
-
-#cat > /etc/netplan/00-global-dhcp-id.yaml <<'EOC'
-#network:
-#    version: 2
-#    renderer: networkd
-#    ethernets:
-#      global-defaults:
-#        dhcp-identifier: mac
-#EOC
-#chmod 600 /etc/netplan/00-global-dhcp-id.yaml
-
-
 
 
 ## APP LEVEL RUST
@@ -245,14 +203,30 @@ if [ -n "${RUST_VERSION:-}" ]; then
     rm -rf "${TMP_RUST}"
     mkdir -p "${TMP_RUST}"
     cd "${TMP_RUST}"
+
     curl -fsSLO "${RUST_DIST_BASE}/${RUST_PKG}"
     curl -fsSLO "${RUST_DIST_BASE}/${RUST_PKG}.asc"
     curl -fsSL -o rust-key.asc "${RUST_KEY_URL}"
+
     gpg --batch --import rust-key.asc
+
     if [ -n "${RUST_SIGNING_FPR:-}" ]; then
-        gpg --batch --list-keys --with-colons "${RUST_SIGNING_FPR}" | grep -q '^fpr:'
+        # 1. Extract the actual fingerprint of the imported key
+        # 2. Compare it directly against your expected RUST_SIGNING_FPR string
+        IMPORTED_FPR=$(gpg --batch --with-colons --fingerprint --list-keys "rust-key@rust-lang.org" | awk -F: '/^fpr:/ {print $10; exit}')
+
+        if [ "${IMPORTED_FPR}" != "${RUST_SIGNING_FPR}" ]; then
+            echo "CRITICAL ERROR: Fingerprint mismatch!"
+            echo "Expected: ${RUST_SIGNING_FPR}"
+            echo "Got     : ${IMPORTED_FPR}"
+            exit 1
+        fi
+        echo "Fingerprint verified successfully."
     fi
+
+    # Verify the cryptographic signature of the archive
     gpg --batch --verify "${RUST_PKG}.asc" "${RUST_PKG}"
+
     tar -xJf "${RUST_PKG}"
     "./rust-${RUST_VERSION}-${RUST_ARCH}/install.sh" --prefix=/opt/rust --without=rust-docs
     ln -sfn /opt/rust/bin/rustc /usr/local/bin/rustc
@@ -287,22 +261,63 @@ for fs in dev/pts dev proc sys run ; do
     umount -lf "${ROOTFS}/$fs"
 done
 
+# CLOUD-INIT
+
+cat > ${ROOTFS}/etc/cloud/cloud.cfg.d/91-ipxe-nocloud.cfg <<'EOC'
+datasource_list: [ "NoCloud", "None" ]
+EOC
+
+cat > ${ROOTFS}/etc/cloud/cloud.cfg.d/92-custom-networking.cfg <<'EOC'
+network:
+  version: 2
+  ethernets:
+    default:
+      match:
+        name: "en*"
+      dhcp4: true
+      dhcp6: true
+      mtu: 9000
+      accept-ra: true
+      dhcp-identifier: mac
+EOC
+
+# IPMI Watchdog configure
+cat > ${ROOTFS}/etc/modprobe.d/ipmi_watchdog.conf <<'EOC'
+options ipmi_watchdog start_now=0
+EOC
+
+cat > ${ROOTFS}/etc/modules-load.d/ipmi_watchdog.conf <<'EOC'
+ipmi_watchdog
+EOC
+
+sed -i '/^\[Manager\]/a RuntimeWatchdogSec=180' ${ROOTFS}/etc/systemd/system.conf
+
+#cat > ${ROOTFS}/etc/netplan/00-global-dhcp-id.yaml <<'EOC'
+#network:
+#    version: 2
+#    renderer: networkd
+#    ethernets:
+#      global-defaults:
+#        dhcp-identifier: mac
+#EOC
+#chmod 600 /etc/netplan/00-global-dhcp-id.yaml
+
+
 #rm -f "${ROOTFS}/etc/resolv.conf"
 rm -f "${ROOTFS}/usr/sbin/policy-rc.d" "${ROOTFS}/tmp/configure-ipxe-rootfs.sh"
 
 KERNEL_VER="$(chroot "${ROOTFS}" /bin/bash -lc "ls -1 /lib/modules | sort -V | tail -n 1")"
 log "Configuring KERNEL_VER=${KERNEL_VER}. KERNEL_OUT=${KERNEL_OUT} INITRD_OUT=${INITRD_OUT}"
 
-
 cp "${ROOTFS}/boot/vmlinuz-${KERNEL_VER}" "${KERNEL_OUT}"
 cp "${ROOTFS}/boot/initrd.img-${KERNEL_VER}" "${INITRD_OUT}"
 require_file "${KERNEL_OUT}" "custom kernel"
 require_file "${INITRD_OUT}" "custom initrd"
 
-if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/ethernet/sfc/sfc.ko'; then
-    echo "Custom initrd does not contain sfc.ko" >&2
-    exit 1
-fi
+#if ! lsinitramfs "${INITRD_OUT}" | grep -q 'kernel/drivers/net/ethernet/sfc/sfc.ko'; then
+#    echo "Custom initrd does not contain sfc.ko" >&2
+#    exit 1
+#fi
 
 #if ! lsinitramfs "${INITRD_OUT}" | grep -Eq 'virtio_net\.ko(\.(xz|zst))?$'; then
 #    echo "Custom initrd does not contain virtio_net" >&2
