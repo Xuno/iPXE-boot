@@ -348,6 +348,7 @@ mv -f "${TMP_ISO}" "${FINAL_ISO}"
 cp -f "${KERNEL_OUT}" "${OUT_DIR}/casper/vmlinuz"
 cp -f "${INITRD_OUT}" "${OUT_DIR}/casper/initrd"
 (cd "${OUT_DIR}" && sha256sum "${CUSTOM_ISO_NAME}" casper/vmlinuz casper/initrd > SHA256SUMS)
+chmod 644 "${OUT_DIR}/casper/*"
 
 log "ISO build complete"
 ls -lh "${FINAL_ISO}" "${OUT_DIR}/casper/vmlinuz" "${OUT_DIR}/casper/initrd"
