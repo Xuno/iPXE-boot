@@ -6,10 +6,10 @@ services:
     privileged: true
     image: ipxe-ubuntu-iso-builder
     build:
-      context: iso/
-      dockerfile: iso/Dockerfile
+      context: ./iso/
+      dockerfile: Dockerfile
       args:
-        UBUNTU_VER: ${UBUNTU_VER:-ubuntu:24:04}
+        UBUNTU_VER: ${UBUNTU_VER:-ubuntu:24.04}
     environment:
       UBUNTU_ISO_URL: ${UBUNTU_ISO_URL:-https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso}
       VERIFY_UBUNTU_ISO: ${VERIFY_UBUNTU_ISO:-1}

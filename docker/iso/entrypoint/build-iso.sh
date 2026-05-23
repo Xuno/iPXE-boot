@@ -359,13 +359,18 @@ xorriso -indev "${BASE_ISO}" \
     -rm /casper/ubuntu-server-minimal.ubuntu-server.installer.generic.squashfs \
     -rm /casper/ubuntu-server-minimal.ubuntu-server.installer.generic-hwe.squashfs \
     -rm /casper/ubuntu-server-minimal.ubuntu-server.squashfs \
-    -rm /casper/install-sources.yaml
+    -rm /casper/install-sources.yaml || echo $? || true
 
 mv -f "${TMP_ISO}" "${FINAL_ISO}"
+if [ ! -f ${FINAL_ISO} ]; then
+ echo "ISO not found in ${FINAL_ISO} after moving from ${TMP_ISO}"
+ exit 1
+fi
 cp -f "${KERNEL_OUT}" "${OUT_DIR}/casper/vmlinuz"
 cp -f "${INITRD_OUT}" "${OUT_DIR}/casper/initrd"
 (cd "${OUT_DIR}" && sha256sum "${CUSTOM_ISO_NAME}" casper/vmlinuz casper/initrd > SHA256SUMS)
-chmod 644 "${OUT_DIR}/casper/*"
+chmod -R 644 ${OUT_DIR}/casper/*
 
-log "ISO build complete"
+log "ISO build complete to name '${FINAL_ISO}'"
+
 ls -lh "${FINAL_ISO}" "${OUT_DIR}/casper/vmlinuz" "${OUT_DIR}/casper/initrd"
